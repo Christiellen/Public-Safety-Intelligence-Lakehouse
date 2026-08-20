@@ -53,3 +53,54 @@ Designed to seamlessly integrate with **Power BI**, providing a command-center l
 
 ## Disclaimer
 Datasets integrated from public sources; some dimensions (such as IDH and Fleet distributions) were enriched or simulated for architectural and pipeline demonstration purposes. This project focuses on demonstrating senior-level Data Engineering practices, Medallion Architecture implementation, and Star Schema design principles.
+
+
+## Architecture Diagram
+
+```mermaid
+graph TD
+    %% Sources
+    subgraph Sources ["Public Data Sources"]
+        SINESP["SINESP (Crime Records)"]
+        IBGE["IBGE (Demographics & GDP)"]
+        SENATRAN["SENATRAN (Vehicle Fleet)"]
+        IDH["UNDP/Ipea (IDH Metrics)"]
+    end
+
+    %% Bronze Layer
+    subgraph Bronze ["Bronze Layer (Raw Ingestion)"]
+        B1["Raw Delta Tables (Zero Transformation)"]
+    end
+
+    %% Silver Layer
+    subgraph Silver ["Silver Layer (Cleansing & Standardization)"]
+        S1["String Normalization & Sanitization"]
+        S2["Composite Keys (Municipality + State)"]
+        S3["Deduplication & Null Handling"]
+    end
+
+    %% Gold Layer
+    subgraph Gold ["Gold Layer (Business Intelligence & Star Schema)"]
+        G1["gold_public_safety_macro (Fact Table)"]
+        G2["gold_advanced_analytics_intelligence (Z-Score, IVSC, Tiers)"]
+    end
+
+    %% Consumption
+    subgraph Consumption ["Consumption Layer"]
+        BI["Power BI Command Center"]
+    end
+
+    %% Flow Connections
+    SINESP --> B1
+    IBGE --> B1
+    SENATRAN --> B1
+    IDH --> B1
+
+    B1 --> S1 --> S2 --> S3
+
+    S3 --> G1
+    S1 --> G1
+    G1 --> G2
+
+    G1 --> BI
+    G2 --> BI
