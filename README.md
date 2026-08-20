@@ -34,14 +34,22 @@ Designed to seamlessly integrate with **Power BI**, providing a command-center l
 
 
 ## Project Structure
-- `01_Ingestion_Bronze_Sinesp` — Raw crime data ingestion.
-- `02_Silver_Cleansing_Sinesp` — Crime data sanitization and composite key structuring.
-- `03_Ingestion_Silver_IBGE_Population` — Population demographics pipeline.
-- `04_Ingestion_Silver_Economic_PIB` — GDP and economic indicators pipeline.
-- `05_Ingestion_Silver_Fleet_Detailed` — Vehicle fleet asset integration.
-- `06_Ingestion_Silver_IDH` — Human Development Index processing.
-- `07_Gold_Public_Safety_Macro` — Star Schema macro fact table materialization.
-- `08_Gold_Advanced_Analytics_Engine` — Advanced statistical intelligence & ML features.
+The ELT pipeline is orchestrated via Databricks Notebooks, strictly adhering to the Medallion Architecture data quality standards:
+
+### Bronze Layer (Raw Ingestion)
+- `01_Ingestion_API_IBGE` — Automated extraction of raw demographic data directly from IBGE APIs.
+- `03_Ingestion_Automated_SINESP` — Ingestion of historical public safety and crime records (SINESP).
+
+### Silver Layer (Cleansing & Conformed Data)
+- `02_Silver_Cleansing_IBGE` — Sanitization of IBGE demographics, standardizing municipality strings and state codes.
+- `04_Silver_Cleansing_SINESP` — Cleansing of crime data, handling nulls, and applying composite key business rules.
+- `05_Ingestion_Silver_Economic_PIB` — Processing and standardization of regional GDP economic data.
+- `06_Ingestion_Silver_Fleet_Detailed` — Processing of vehicle fleet datasets (SENATRAN).
+- `07_Ingestion_Silver_IDH` — Normalization of Human Development Index (HDI) metrics.
+
+### Gold Layer (Star Schema & Intelligence)
+- `08_Gold_Public_Safety_Macro` — The core Fact Table integrating crime occurrences with demographics (rates per 100k inhabitants).
+- `09_Gold_Advanced_Analytics_Engine` — Statistical engine calculating Z-Scores, anomaly detection, and the Social & Criminal Vulnerability Index (IVSC).
 
 
 ## Tech Stack
