@@ -178,7 +178,7 @@ ORDER BY hotspot_neighbors DESC LIMIT 10
 
 ## How to run
 
-1. Import the notebooks into one Databricks workspace folder (Free Edition works). They must stay together, because each one loads `00_config_utils` with `%run`.
+1. Import the `notebooks/` folder into a Databricks workspace (Free Edition works), or clone this repository as a Databricks Git folder. The notebooks are stored in Databricks source format (`.py`) so changes are readable in Git diffs. They must stay in the same folder, because each one loads `00_config_utils` with `%run`.
 2. Review `00_config_utils`: catalog (`workspace` by default), schemas, SINESP years, SENATRAN month and the event groups (`CVLI_EVENTS`).
 3. Run the notebooks in order, `01` to `15`, or create a Databricks Job with one task per notebook in that sequence.
    For the graph stage, create a Neo4j AuraDB instance and store its credentials in a Databricks secret scope named `psi` (keys `neo4j-uri`, `neo4j-user`, `neo4j-password`). Notebook `14` does a full refresh of this project's nodes only (label `:PSI`, set in `NEO4J_PROJECT_LABEL`).
