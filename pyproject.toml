@@ -1,0 +1,33 @@
+[project]
+name = "public-safety-intelligence-lakehouse"
+version = "1.0.0"
+description = "Databricks lakehouse, Neo4j graph and multi-agent GenAI assistant over Brazilian public safety data"
+requires-python = ">=3.12"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra --strict-markers"
+cache_dir = ".pytest_cache"
+filterwarnings = [
+    "ignore::DeprecationWarning",
+    "ignore::FutureWarning",
+    "ignore::UserWarning",
+]
+
+[tool.ruff]
+line-length = 120
+target-version = "py312"
+extend-include = ["notebooks/*.py"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP"]
+ignore = [
+    "E501",   # long lines: markdown cells in notebooks and long Spark chains
+    "UP017",  # keep datetime.timezone.utc (same style in every notebook)
+]
+
+[tool.ruff.lint.per-file-ignores]
+# Databricks notebooks: names defined by "%run ./00_config_utils" (spark, F, tbl...) or by the runtime
+# (spark, dbutils, display) are unknown to static analysis; imports are not at the top of the file
+# because every cell is a separate execution unit.
+"notebooks/*.py" = ["F821", "F405", "F403", "E402", "I001"]

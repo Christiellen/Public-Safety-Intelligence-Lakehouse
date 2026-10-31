@@ -1,0 +1,24 @@
+# Local tests and CI (GitHub Actions). Databricks installs its own runtime; the notebooks that
+# need extra libraries install them with %pip (13: spatial, 14: neo4j, 18/19: agents).
+pyspark==4.0.5          # Spark 4, as in Databricks Runtime 17 and serverless
+pandas==2.3.3
+numpy==2.3.4
+requests==2.34.2
+openpyxl==3.1.5          # Bronze notebooks 02-03 read the SINESP and SENATRAN spreadsheets
+# Spatial (notebooks 12-13)
+geopandas==1.2.0
+shapely==2.2.0
+pyogrio==0.13.0
+libpysal==4.15.1
+esda==2.10.0
+networkx==3.7
+# Agents (notebooks 16-19)
+langgraph==1.2.18
+langchain-core==1.7.3
+langchain-google-genai==4.4.2
+google-genai==2.34.0
+sqlglot==30.27.0
+neo4j==6.4.1
+# Tooling
+pytest==9.1.1
+ruff==0.17.3
