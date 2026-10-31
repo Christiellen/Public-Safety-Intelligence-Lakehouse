@@ -120,6 +120,8 @@ All data is real and public. Each indicator carries the year it refers to (`popu
 | `graph_communities` | Analytical table | One row per Louvain community |
 | `municipality_borders` | Edge list | One row per pair of neighboring municipalities, with border length in km |
 
+**Data dictionary.** Every column of the tables that the analytics and the AI agents use is described in [`docs/data_dictionary`](docs/data_dictionary/README.md), with its data type, and can be downloaded as [Excel](docs/data_dictionary/data_dictionary.xlsx) or [CSV](docs/data_dictionary/data_dictionary.csv). The files are generated from `psi_gold.data_dictionary` (notebook 16), and a test fails when they are out of date.
+
 ## Data quality rules
 
 - **Single join key.** Sources without the IBGE code are matched on state + normalized name. The name key keeps letters and digits only, so *Santa Bárbara d'Oeste*, *SANTA BARBARA D OESTE* and *SANTA BARBARA DOESTE* match. Known renames are mapped in `MUNICIPALITY_ALIASES`. What is left goes through a conservative fuzzy match: same state, Levenshtein distance up to 1 (short names) or 2 (10+ characters), and a single best candidate, so ties are never matched. This covers typos, preposition swaps (*do/de/dos*) and names truncated at 30 characters. Every fuzzy match is recorded in `psi_silver.qa_fuzzy_matches` with the source name, the IBGE name and the distance.
@@ -314,7 +316,7 @@ How it works: `tests/notebook_loader.py` executes the Databricks source files ce
 | `test_config_utils` | Name keys, text normalization, safe parsing of counts under ANSI mode |
 | `test_pipeline` | Notebooks 05-10: homonyms, alias vs fuzzy matching, unmatched names reported, measures never mixed, CVLI victims and rates, state totals |
 | `test_spatial` | Notebooks 12-13: rook contiguity (corners are not neighbors), border length, islands, LISA values, communities |
-| `test_data_dictionary` | Notebook 16: dictionary and UC comments; the quality gate fails on undocumented or removed columns |
+| `test_data_dictionary` | Notebook 16: dictionary and UC comments; the quality gate fails on undocumented or removed columns; the published dictionary (`docs/data_dictionary`) matches the table |
 | `test_guards` | Notebook 17: SQL and Cypher queries that must pass and that must be blocked (writes, other schemas, other projects' nodes, table functions, multiple statements) |
 | `test_agents` | Notebook 17-19 with a fake LLM and a fake Neo4j driver: routing, parallel specialists, self-correction, answer language, model fallback, read transaction with timeout, audit log, and the evaluation notebook end to end |
 | `test_incremental` | Change log and skipped runs: a re-run without new data does nothing; a revised 2026 file reprocesses only the 2026 partitions (2025 untouched) and updates the analytics; a new fleet month is added and used while older months are kept; `FULL_REFRESH` reprocesses every year |

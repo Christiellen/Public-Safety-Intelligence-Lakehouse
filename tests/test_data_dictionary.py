@@ -40,3 +40,20 @@ def test_quality_gate_fails_on_removed_column(agents):
             run_cell("16_gold_data_dictionary.py", agents, "Quality gate")
     finally:
         agents["DICTIONARY"] = original
+
+
+def test_published_dictionary_is_up_to_date(agents):
+    """docs/data_dictionary (CSV, Excel, Markdown) must match psi_gold.data_dictionary.
+    Regenerate with: UPDATE_DOCS=1 pytest tests/test_data_dictionary.py -k published"""
+    import os
+
+    import dictionary_docs as docs
+
+    table = agents["spark"].table(agents["tbl"]("gold", "data_dictionary")).toPandas()
+    rows = docs.rows_of(table, agents["DICTIONARY"])
+    if os.environ.get("UPDATE_DOCS") == "1":
+        docs.write_all(rows)
+    hint = "run UPDATE_DOCS=1 pytest tests/test_data_dictionary.py -k published"
+    assert docs.CSV_FILE.read_text(encoding="utf-8") == docs.render_csv(rows), f"CSV out of date; {hint}"
+    assert docs.MD_FILE.read_text(encoding="utf-8") == docs.render_markdown(rows), f"Markdown out of date; {hint}"
+    assert docs.read_xlsx_columns(docs.XLSX_FILE) == [r for r in rows if r[1]], f"Excel out of date; {hint}"
