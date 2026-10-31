@@ -22,9 +22,9 @@
 # COMMAND ----------
 
 CONSUMER = "06_silver_municipality_indicators"
-run_or_exit(CONSUMER, ["bronze_ibge_population", "bronze_ibge_gdp", "bronze_ipea_idhm", "bronze_senatran_fleet",
-                       "silver_dim_municipality"],
-            outputs=[("silver", "municipality_indicators")])
+pending = run_or_exit(CONSUMER, ["bronze_ibge_population", "bronze_ibge_gdp", "bronze_ipea_idhm", "bronze_senatran_fleet",
+                                 "silver_dim_municipality"],
+                      outputs=[("silver", "municipality_indicators")])
 
 # COMMAND ----------
 

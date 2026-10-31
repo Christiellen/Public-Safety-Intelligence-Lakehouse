@@ -381,14 +381,13 @@ def nan_to_null(df: DataFrame) -> DataFrame:
                       for c, t in df.dtypes])
 
 
-def write_table(df: DataFrame, layer: str, name: str, partition_by=None) -> str:
+def write_table(df: DataFrame, layer: str, name: str, partition_by=None) -> None:
     target = tbl(layer, name)
     writer = df.write.format(TABLE_FORMAT).mode("overwrite").option("overwriteSchema", "true")
     if partition_by:
         writer = writer.partitionBy(*partition_by)
     writer.saveAsTable(target)
     print(f"Saved {target}: {spark.table(target).count():,} rows")
-    return target
 
 
 def write_source_qa(rows: DataFrame, table: str, source: str) -> None:
@@ -523,25 +522,28 @@ def run_or_exit(consumer: str, datasets: list, outputs: list = (), output_missin
     dbutils.notebook.exit(message)
 
 
-def replace_partitions(df: DataFrame, layer: str, name: str, column: str, values) -> str:
+def replace_partitions(df: DataFrame, layer: str, name: str, column: str, values) -> None:
     """Writes `df` replacing only the partitions `column IN values` (e.g. the SINESP years that
     changed); the other partitions are kept. Creates the table on the first run, rewrites it with
     FULL_REFRESH, and merges the new columns when the schema changes."""
     target = tbl(layer, name)
     values = sorted(set(values))
     if FULL_REFRESH or not spark.catalog.tableExists(target):
-        return write_table(df, layer, name, partition_by=[column])
+        write_table(df, layer, name, partition_by=[column])
+        return
     existing = spark.table(target)
     if column not in existing.columns:
         print(f"WARNING {target}: table without the partition column `{column}` (created by an earlier version); "
               f"rewritten with the data of this run ({column} in {values}). Run with FULL_REFRESH if other values are missing.")
-        return write_table(df, layer, name, partition_by=[column])
+        write_table(df, layer, name, partition_by=[column])
+        return
     if set(existing.columns) != set(df.columns):
         print(f"{target}: schema changed; rewriting it with the other partitions kept")
         df = existing.filter(~F.col(column).isin(values)).unionByName(df, allowMissingColumns=True)
         if TABLE_FORMAT != "delta":   # Parquet (local tests) cannot overwrite a table it is reading
             df = spark.createDataFrame(df.collect(), df.schema)
-        return write_table(df, layer, name, partition_by=[column])
+        write_table(df, layer, name, partition_by=[column])
+        return
     if TABLE_FORMAT == "delta":
         literals = ", ".join(f"'{v}'" if isinstance(v, str) else str(v) for v in values)
         (df.write.format("delta").mode("overwrite").option("replaceWhere", f"{column} IN ({literals})")
@@ -550,7 +552,6 @@ def replace_partitions(df: DataFrame, layer: str, name: str, column: str, values
         spark.conf.set("spark.sql.sources.partitionOverwriteMode", "dynamic")
         df.select(*existing.columns).write.insertInto(target, overwrite=True)
     print(f"Saved {target}: partitions {column} in {values} replaced; {spark.table(target).count():,} rows in total")
-    return target
 
 
 def write_if_changed(name: str, content: bytes, build) -> bool:

@@ -34,9 +34,9 @@
 # COMMAND ----------
 
 CONSUMER = "13_gold_spatial_analytics"
-run_or_exit(CONSUMER, ["silver_adjacency", "gold_municipality_analytics"],
-            outputs=[("gold", "municipality_spatial_metrics"), ("gold", "graph_communities"),
-                     ("gold", "municipality_borders")])
+pending = run_or_exit(CONSUMER, ["silver_adjacency", "gold_municipality_analytics"],
+                      outputs=[("gold", "municipality_spatial_metrics"), ("gold", "graph_communities"),
+                               ("gold", "municipality_borders")])
 
 # COMMAND ----------
 

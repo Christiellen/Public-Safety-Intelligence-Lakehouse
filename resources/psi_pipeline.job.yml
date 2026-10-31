@@ -1,0 +1,82 @@
+# Weekly refresh of the lakehouse, the spatial analytics and the Neo4j graph (notebooks 01-16).
+# The pipeline is incremental: a task with nothing new to process ends at its start with
+# "nothing to do" (dbutils.notebook.exit), which counts as success, and the job moves on.
+# Tasks without a dependency between them run in parallel (e.g. the five Bronze loads).
+# The AI assistant (17-19) is not scheduled: it runs on demand and uses a paid LLM API.
+resources:
+  jobs:
+    psi_pipeline:
+      name: PSI - Lakehouse, spatial analytics and graph
+      description: Incremental refresh of the Public Safety Intelligence Lakehouse (notebooks 01-16).
+      max_concurrent_runs: 1
+      timeout_seconds: 7200
+
+      schedule:
+        quartz_cron_expression: "0 0 6 ? * MON"   # Mondays 06:00
+        timezone_id: America/Sao_Paulo
+
+      parameters:
+        - name: full_refresh   # "true" ignores the change log and rebuilds everything
+          default: "false"
+
+      tasks:
+        # ---------------- Bronze: public sources (network calls are retried) ----------------
+        - task_key: bronze_ibge
+          notebook_task: {notebook_path: ../notebooks/01_bronze_ibge.py}
+          max_retries: 2
+          min_retry_interval_millis: 60000
+        - task_key: bronze_sinesp
+          notebook_task: {notebook_path: ../notebooks/02_bronze_sinesp.py}
+          max_retries: 2
+          min_retry_interval_millis: 60000
+        - task_key: bronze_senatran
+          notebook_task: {notebook_path: ../notebooks/03_bronze_senatran.py}
+          max_retries: 2
+          min_retry_interval_millis: 60000
+        - task_key: bronze_idhm
+          notebook_task: {notebook_path: ../notebooks/04_bronze_idhm.py}
+          max_retries: 2
+          min_retry_interval_millis: 60000
+        - task_key: bronze_ibge_mesh
+          notebook_task: {notebook_path: ../notebooks/11_bronze_ibge_mesh.py}
+          max_retries: 2
+          min_retry_interval_millis: 60000
+
+        # ---------------- Silver ----------------
+        - task_key: silver_dim_municipality
+          depends_on: [{task_key: bronze_ibge}]
+          notebook_task: {notebook_path: ../notebooks/05_silver_dim_municipality.py}
+        - task_key: silver_municipality_indicators
+          depends_on: [{task_key: silver_dim_municipality}, {task_key: bronze_senatran}, {task_key: bronze_idhm}]
+          notebook_task: {notebook_path: ../notebooks/06_silver_municipality_indicators.py}
+        - task_key: silver_sinesp_occurrences
+          depends_on: [{task_key: silver_dim_municipality}, {task_key: bronze_sinesp}]
+          notebook_task: {notebook_path: ../notebooks/07_silver_sinesp_occurrences.py}
+        - task_key: silver_municipality_adjacency
+          depends_on: [{task_key: silver_dim_municipality}, {task_key: bronze_ibge_mesh}]
+          notebook_task: {notebook_path: ../notebooks/12_silver_municipality_adjacency.py}
+
+        # ---------------- Gold ----------------
+        - task_key: gold_star_schema
+          depends_on: [{task_key: silver_municipality_indicators}, {task_key: silver_sinesp_occurrences}]
+          notebook_task: {notebook_path: ../notebooks/08_gold_star_schema.py}
+        - task_key: gold_municipality_analytics
+          depends_on: [{task_key: gold_star_schema}]
+          notebook_task: {notebook_path: ../notebooks/09_gold_municipality_analytics.py}
+        - task_key: gold_state_analytics
+          depends_on: [{task_key: gold_star_schema}]
+          notebook_task: {notebook_path: ../notebooks/10_gold_state_analytics.py}
+        - task_key: gold_spatial_analytics
+          depends_on: [{task_key: gold_municipality_analytics}, {task_key: silver_municipality_adjacency}]
+          notebook_task: {notebook_path: ../notebooks/13_gold_spatial_analytics.py}
+
+        # ---------------- Graph, map and documentation ----------------
+        - task_key: graph_load_neo4j
+          depends_on: [{task_key: gold_spatial_analytics}]
+          notebook_task: {notebook_path: ../notebooks/14_graph_load_neo4j.py}
+        - task_key: gold_lisa_map
+          depends_on: [{task_key: gold_spatial_analytics}]
+          notebook_task: {notebook_path: ../notebooks/15_gold_lisa_map.py}
+        - task_key: gold_data_dictionary
+          depends_on: [{task_key: gold_state_analytics}, {task_key: gold_spatial_analytics}]
+          notebook_task: {notebook_path: ../notebooks/16_gold_data_dictionary.py}

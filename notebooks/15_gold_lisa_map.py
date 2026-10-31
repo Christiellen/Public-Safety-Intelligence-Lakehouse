@@ -31,7 +31,7 @@ import os
 
 CONSUMER = "15_gold_lisa_map"
 MAP_PATH = f"/Volumes/{CATALOG}/{SCHEMAS['gold']}/reports/lisa_cluster_map.png"
-run_or_exit(CONSUMER, ["gold_spatial"], output_missing=not os.path.exists(MAP_PATH))
+pending = run_or_exit(CONSUMER, ["gold_spatial"], output_missing=not os.path.exists(MAP_PATH))
 
 # COMMAND ----------
 

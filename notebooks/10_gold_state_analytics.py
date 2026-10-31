@@ -22,8 +22,8 @@
 # COMMAND ----------
 
 CONSUMER = "10_gold_state_analytics"
-run_or_exit(CONSUMER, ["gold_facts", "gold_dimensions"],
-            outputs=[("gold", "state_analytics")])
+pending = run_or_exit(CONSUMER, ["gold_facts", "gold_dimensions"],
+                      outputs=[("gold", "state_analytics")])
 
 # COMMAND ----------
 

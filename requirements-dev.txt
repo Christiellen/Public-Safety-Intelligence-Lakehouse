@@ -21,4 +21,5 @@ sqlglot==30.27.0
 neo4j==6.4.1
 # Tooling
 pytest==9.1.1
+pyyaml==6.0.3           # tests/test_job_definition.py reads the Databricks job
 ruff==0.17.3

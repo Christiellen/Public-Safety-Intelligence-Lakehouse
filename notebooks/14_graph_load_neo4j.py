@@ -35,7 +35,7 @@
 # COMMAND ----------
 
 CONSUMER = "14_graph_load_neo4j"
-run_or_exit(CONSUMER, ["gold_spatial", "gold_municipality_analytics", "gold_dimensions"])
+pending = run_or_exit(CONSUMER, ["gold_spatial", "gold_municipality_analytics", "gold_dimensions"])
 
 # COMMAND ----------
 

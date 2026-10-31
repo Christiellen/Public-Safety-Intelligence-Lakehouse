@@ -50,3 +50,24 @@ jobs:
         with:
           name: junit-report
           path: reports/junit.xml
+
+  bundle:
+    name: Databricks bundle (validate)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    # Runs only when the repository has the secrets DATABRICKS_HOST and DATABRICKS_TOKEN;
+    # otherwise the step is skipped (forks and pull requests from outside have no secrets).
+    env:
+      DATABRICKS_HOST: ${{ secrets.DATABRICKS_HOST }}
+      DATABRICKS_TOKEN: ${{ secrets.DATABRICKS_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: databricks/setup-cli@main
+        if: env.DATABRICKS_HOST != ''
+      - name: Validate bundle
+        if: env.DATABRICKS_HOST != ''
+        run: databricks bundle validate
+      - name: Skip notice
+        if: env.DATABRICKS_HOST == ''
+        run: echo "DATABRICKS_HOST/DATABRICKS_TOKEN secrets not set; bundle validation skipped."
+

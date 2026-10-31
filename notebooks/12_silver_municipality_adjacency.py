@@ -28,8 +28,8 @@
 # COMMAND ----------
 
 CONSUMER = "12_silver_municipality_adjacency"
-run_or_exit(CONSUMER, ["bronze_ibge_mesh", "silver_dim_municipality"],
-            outputs=[("silver", "municipality_adjacency"), ("silver", "municipality_geo")])
+pending = run_or_exit(CONSUMER, ["bronze_ibge_mesh", "silver_dim_municipality"],
+                      outputs=[("silver", "municipality_adjacency"), ("silver", "municipality_geo")])
 
 # COMMAND ----------
 

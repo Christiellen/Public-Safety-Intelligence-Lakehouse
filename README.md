@@ -242,7 +242,7 @@ Median latency 12.7 s per question; about 9,000 input and 2,000 output tokens pe
 
 1. Import the `notebooks/` folder into a Databricks workspace (Free Edition works), or clone this repository as a Databricks Git folder. The notebooks are stored in Databricks source format (`.py`) so changes are readable in Git diffs. They must stay in the same folder, because each one loads `00_config_utils` with `%run`.
 2. Review `00_config_utils`: catalog (`workspace` by default), schemas, SINESP years, SENATRAN month and the event groups (`CVLI_EVENTS`).
-3. Run the notebooks in order, `01` to `16`, or create a Databricks Job with one task per notebook in that sequence. Later runs are incremental: a notebook with nothing new to process ends at the start with "nothing to do", and the job continues with the next task.
+3. Run the notebooks in order, `01` to `16`, or deploy the job with the Databricks Asset Bundle (see *Orchestration*). Later runs are incremental: a notebook with nothing new to process ends at the start with "nothing to do", and the job continues with the next task.
    For the graph stage, create a Neo4j AuraDB instance and store its credentials in a Databricks secret scope named `psi` (keys `neo4j-uri`, `neo4j-user`, `neo4j-password`). Notebook `14` touches only this project's nodes (label `:PSI`, set in `NEO4J_PROJECT_LABEL`).
 4. For the AI assistant, create a Gemini API key in Google AI Studio and store it in the same scope as `gemini-api-key`. Run `18_agents_demo` to ask questions and `19_agents_evaluation` to score the assistant. The model is chosen automatically from the Flash models available to the key (`GEMINI_MODEL_PREFERENCE` in `17_agents_multiagent`).
 5. After the Silver notebooks, review `psi_silver.qa_fuzzy_matches` and `psi_silver.qa_unmatched_municipalities`; add renamed municipalities to `MUNICIPALITY_ALIASES`.
@@ -281,11 +281,26 @@ The pipeline is incremental: each run processes only what changed since the prev
 - **Neo4j** is updated by mark and sweep: nodes and borders are upserted with `MERGE` and stamped with the run's `load_id`, then only the `:PSI` elements not stamped are removed. The graph is never empty during a refresh.
 - **Full refresh.** `FULL_REFRESH = True` in `00_config_utils` (or the job parameter `full_refresh=true`) ignores the logs and rebuilds everything, e.g. after changing a business rule such as `CVLI_EVENTS` or `WINDOW_MONTHS`.
 
+## Orchestration (Databricks Asset Bundle)
+
+The pipeline is defined as code in `databricks.yml` and `resources/psi_pipeline.job.yml`: one Databricks Job with a task per notebook (01-16), dependencies that follow the data (the five Bronze loads run in parallel; Silver, Gold, spatial analytics, the Neo4j load, the map and the data dictionary follow), retries on the tasks that call public APIs, a weekly schedule (Mondays 06:00, São Paulo time) and the job parameter `full_refresh`. Because the notebooks are incremental, a task with nothing new ends at its start and the job moves on. The AI assistant (17-19) is not scheduled: it runs on demand and uses a paid LLM API.
+
+```bash
+databricks auth login --host https://<your-workspace>.cloud.databricks.com
+databricks bundle validate
+databricks bundle deploy               # target dev: job prefixed "[dev <user>]", schedule paused
+databricks bundle run psi_pipeline     # run it now (add --params full_refresh=true to rebuild)
+databricks bundle deploy -t prod       # scheduled production job
+```
+
+`tests/test_job_definition.py` checks the job against the notebooks themselves: every table a task reads must be written by an upstream task, and every input of `run_or_exit` must be logged upstream, so a new dependency that is not reflected in the job order fails the build. With the repository secrets `DATABRICKS_HOST` and `DATABRICKS_TOKEN`, the CI also runs `databricks bundle validate`.
+
 ## Tests and CI
 
-Every push and pull request runs two jobs on GitHub Actions (`.github/workflows/ci.yml`):
+Every push and pull request runs these jobs on GitHub Actions (`.github/workflows/ci.yml`):
 
 - **Lint:** `ruff check` on the notebooks and the tests.
+- **Bundle:** `databricks bundle validate`, when the Databricks secrets are configured.
 - **Tests:** `pytest` runs the **real notebooks** on a local Spark 4 session (Python 3.12, as on Databricks serverless), with no Databricks workspace, Neo4j or Gemini key.
 
 How it works: `tests/notebook_loader.py` executes the Databricks source files cell by cell, the way `%run` does, with two local overrides (no Unity Catalog, Parquet instead of Delta), and honours `dbutils.notebook.exit`. `tests/fake_sources.py` serves the SINESP and SENATRAN spreadsheets in memory (`FakeWeb`), so the Bronze notebooks 02 and 03 run for real, and writes the other small Bronze tables that reproduce the layout and the known problems of each source: homonym municipalities in different states, an old spelling solved by an alias, a typo solved by fuzzy matching, thousands separators, events published per state only, a Federal Police row with every value null, a 6-digit IBGE code, and a 3x3 grid mesh with corner-only contacts and an ocean island.
@@ -299,6 +314,7 @@ How it works: `tests/notebook_loader.py` executes the Databricks source files ce
 | `test_guards` | Notebook 17: SQL and Cypher queries that must pass and that must be blocked (writes, other schemas, other projects' nodes, table functions, multiple statements) |
 | `test_agents` | Notebook 17-19 with a fake LLM and a fake Neo4j driver: routing, parallel specialists, self-correction, answer language, model fallback, read transaction with timeout, audit log, and the evaluation notebook end to end |
 | `test_incremental` | Change log and skipped runs: a re-run without new data does nothing; a revised 2026 file reprocesses only the 2026 partitions (2025 untouched) and updates the analytics; a new fleet month is added and used while older months are kept; `FULL_REFRESH` reprocesses every year |
+| `test_job_definition` | The Databricks job: notebooks 01-16 scheduled once, no cycles, and every table read and change-log input produced by an upstream task |
 | `test_evaluation_helpers` | Notebook 19: numbers in Brazilian and English formats, names with or without accents |
 
 Run locally (Java 17+ and Python 3.12):
@@ -330,5 +346,5 @@ pytest
 
 ## Roadmap
 
-- **Orchestration as code:** a Databricks Asset Bundle with the job (notebooks 01-16 in sequence, weekly schedule) versioned in this repository.
+- **Current municipal development index:** add the IFDM (Firjan, annual, 2013-2023) next to the IDHM, whose latest municipal edition is from the 2010 Census, and use it in the social component of the IVSC.
 - **Data quality monitoring:** a dashboard over `psi_ops.change_log` and the QA tables (rows per load, unmatched names per year).
