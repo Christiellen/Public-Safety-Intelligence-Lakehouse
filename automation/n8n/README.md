@@ -49,11 +49,12 @@ Gold tables built by the notebooks.
 ```bash
 cp automation/n8n/n8n.env.example automation/n8n/n8n.env   # fill in; n8n.env is ignored by Git
 docker volume create n8n_data
-docker run -d --name n8n -p 5678:5678 --env-file automation/n8n/n8n.env \
-  -v n8n_data:/home/node/.n8n n8nio/n8n:2.45.7
+docker run -d --name n8n --restart unless-stopped -p 5678:5678 \
+  --env-file automation/n8n/n8n.env -v n8n_data:/home/node/.n8n n8nio/n8n:2.45.7
 ```
 
-Open http://localhost:5678 and create the owner account.
+Open http://localhost:5678 and create the owner account. On WSL with mirrored networking, if the page does
+not open from Windows, run the container with `--network host` instead of `-p 5678:5678`.
 
 **3. Credentials** (*Credentials* > *Add credential*):
 

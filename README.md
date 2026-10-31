@@ -305,6 +305,10 @@ databricks bundle deploy -t prod       # scheduled production job
 
 [`automation/n8n`](automation/n8n/README.md) has an n8n workflow that turns the weekly run into an executive briefing: every Monday at 08:00 it checks the pipeline job through the Databricks Jobs API (or starts it, on a manual run), and when the run succeeded it queries the Gold layer through the SQL Statement Execution API ([`briefing.sql`](automation/n8n/briefing.sql)), asks Gemini to write the summary, highlights and data quality notes using only those numbers, and sends the e-mail with the data tables. A failed run, or a week without a successful run, sends an alert with the link to the run instead. Settings come from environment variables and the tokens are n8n credentials, so nothing secret is versioned; the tests check the workflow structure, the absence of secrets and run `briefing.sql` on the Gold tables.
 
+A weekly run against the real workspace: the job had succeeded, so the briefing branch ran end to end and the e-mail was sent.
+
+![n8n workflow run](docs/n8n_workflow.png)
+
 ## Tests and CI
 
 Every push and pull request runs these jobs on GitHub Actions (`.github/workflows/ci.yml`):
