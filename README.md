@@ -285,6 +285,10 @@ The pipeline is incremental: each run processes only what changed since the prev
 
 The pipeline is defined as code in `databricks.yml` and `resources/psi_pipeline.job.yml`: one Databricks Job with a task per notebook (01-16), dependencies that follow the data (the five Bronze loads run in parallel; Silver, Gold, spatial analytics, the Neo4j load, the map and the data dictionary follow), retries on the tasks that call public APIs, a weekly schedule (Mondays 06:00, São Paulo time) and the job parameter `full_refresh`. Because the notebooks are incremental, a task with nothing new ends at its start and the job moves on. The AI assistant (17-19) is not scheduled: it runs on demand and uses a paid LLM API.
 
+A run of the job right after a full load: every task succeeded, and the ones with nothing new ended at their start.
+
+![Databricks job run graph](docs/job_run_graph.png)
+
 ```bash
 databricks auth login --host https://<your-workspace>.cloud.databricks.com
 databricks bundle validate
