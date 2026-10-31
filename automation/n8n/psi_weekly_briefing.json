@@ -1,0 +1,784 @@
+{
+  "name": "PSI - Weekly public safety briefing",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "weeks",
+              "triggerAtDay": [
+                1
+              ],
+              "triggerAtHour": 8
+            }
+          ]
+        }
+      },
+      "id": "464aee59-c7fd-53ad-953b-87ad0872d06e",
+      "name": "Every Monday 08:00",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "407f28c2-4a24-5ceb-94ad-5a31bd1ce190",
+      "name": "Run manually",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        220
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "831b02cf-ae98-5f67-9ad4-feecbbe27788",
+              "name": "databricks_host",
+              "value": "={{ ($env.DATABRICKS_HOST || '').replace(/\\/+$/, '') }}",
+              "type": "string"
+            },
+            {
+              "id": "6ae0c236-1bab-5e1a-a3ff-d4aa6c83d851",
+              "name": "job_id",
+              "value": "={{ $env.PSI_JOB_ID }}",
+              "type": "string"
+            },
+            {
+              "id": "958299ff-e938-5cf3-a856-0b058bb790ec",
+              "name": "warehouse_id",
+              "value": "={{ $env.DATABRICKS_WAREHOUSE_ID }}",
+              "type": "string"
+            },
+            {
+              "id": "409c3d5c-057f-53a3-8695-1d4b75be8fee",
+              "name": "email_to",
+              "value": "={{ $env.BRIEFING_EMAIL_TO }}",
+              "type": "string"
+            },
+            {
+              "id": "5826527f-0bf4-5e05-a249-0adfa8c110e0",
+              "name": "email_from",
+              "value": "={{ $env.BRIEFING_EMAIL_FROM || $env.BRIEFING_EMAIL_TO }}",
+              "type": "string"
+            },
+            {
+              "id": "3ee447b5-c6a3-569f-84b0-afa9d35c69f1",
+              "name": "gemini_model",
+              "value": "={{ $env.GEMINI_MODEL || 'gemini-3.6-flash' }}",
+              "type": "string"
+            },
+            {
+              "id": "bfcd06d7-d39d-5828-a37e-23435e02bf06",
+              "name": "language",
+              "value": "={{ $env.BRIEFING_LANGUAGE || 'English' }}",
+              "type": "string"
+            },
+            {
+              "id": "062102b9-964e-5e4f-9337-b349f0efc21d",
+              "name": "gemini_api",
+              "value": "={{ $env.GEMINI_API_BASE || 'https://generativelanguage.googleapis.com' }}",
+              "type": "string"
+            },
+            {
+              "id": "53278a03-2a8e-5cd7-b43a-1bd970a62745",
+              "name": "manual_run",
+              "value": "={{ $('Run manually').isExecuted }}",
+              "type": "boolean"
+            },
+            {
+              "id": "f74a0685-8dea-5e80-b82d-daced6eb7ac2",
+              "name": "briefing_sql",
+              "value": "-- Weekly briefing data: one row, one JSON column, read by the n8n workflow through the\n-- Databricks SQL Statement Execution API. Every number in the e-mail comes from here; the LLM\n-- only writes the text around them.\nSELECT to_json(named_struct(\n  'window_start', (SELECT CAST(min(window_start) AS STRING) FROM workspace.psi_gold.state_analytics),\n  'window_end',   (SELECT CAST(max(window_end) AS STRING) FROM workspace.psi_gold.state_analytics),\n  'national', (\n    SELECT named_struct(\n      'cvli_victims', CAST(sum(cvli_victims) AS BIGINT),\n      'population', CAST(sum(population) AS BIGINT),\n      'cvli_rate_100k', round(sum(cvli_victims) / sum(population) * 100000 * 12 / max(months_covered), 1),\n      'vehicle_crimes', CAST(sum(vehicle_crimes) AS BIGINT),\n      'drug_seizure_kg', round(sum(drug_seizure_kg), 0))\n    FROM workspace.psi_gold.state_analytics),\n  'highest_state_rates', (\n    SELECT array_sort(collect_list(named_struct(\n      'rank', rank, 'state', state_code, 'region', region_name,\n      'cvli_rate_100k', round(cvli_rate_100k, 1), 'cvli_victims', CAST(cvli_victims AS BIGINT))))\n    FROM (SELECT *, row_number() OVER (ORDER BY cvli_rate_100k DESC, state_code) AS rank\n          FROM workspace.psi_gold.state_analytics WHERE cvli_rate_100k IS NOT NULL)\n    WHERE rank <= 5),\n  'lowest_state_rates', (\n    SELECT array_sort(collect_list(named_struct(\n      'rank', rank, 'state', state_code, 'region', region_name,\n      'cvli_rate_100k', round(cvli_rate_100k, 1), 'cvli_victims', CAST(cvli_victims AS BIGINT))))\n    FROM (SELECT *, row_number() OVER (ORDER BY cvli_rate_100k ASC, state_code) AS rank\n          FROM workspace.psi_gold.state_analytics WHERE cvli_rate_100k IS NOT NULL)\n    WHERE rank <= 5),\n  'largest_city_hotspots', (\n    SELECT array_sort(collect_list(named_struct(\n      'rank', rank, 'municipality', municipality_name, 'state', state_code, 'population', population,\n      'cvli_rate_100k', round(cvli_rate_100k, 1), 'lisa_cluster', lisa_cluster)))\n    FROM (SELECT a.*, s.lisa_cluster,\n                 row_number() OVER (ORDER BY a.cvli_rate_100k DESC, a.municipality_code) AS rank\n          FROM workspace.psi_gold.municipality_analytics a\n          LEFT JOIN workspace.psi_gold.municipality_spatial_metrics s USING (municipality_code)\n          WHERE a.is_national_hotspot AND a.population >= 100000)\n    WHERE rank <= 10),\n  'national_hotspots', (SELECT count(*) FROM workspace.psi_gold.municipality_analytics WHERE is_national_hotspot),\n  'high_high_municipalities', (\n    SELECT count(*) FROM workspace.psi_gold.municipality_spatial_metrics WHERE lisa_cluster = 'High-High'),\n  'data_changes_last_7_days', (\n    SELECT array_sort(collect_list(named_struct('dataset', dataset, 'keys', keys)))\n    FROM (SELECT dataset, array_join(array_sort(collect_set(key)), ', ') AS keys\n          FROM workspace.psi_ops.change_log\n          WHERE changed_at >= current_timestamp() - INTERVAL 7 DAYS\n          GROUP BY dataset)),\n  'data_quality', named_struct(\n    'unmatched_municipality_names', (SELECT count(*) FROM workspace.psi_silver.qa_unmatched_municipalities),\n    'fuzzy_matches_to_review', (SELECT count(*) FROM workspace.psi_silver.qa_fuzzy_matches))\n)) AS briefing",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "4b09829b-4fa5-5c79-b347-006f183f5610",
+      "name": "Config",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        220,
+        110
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "29bb26ec-a70b-5022-9c70-a8de8ede159b",
+              "leftValue": "={{ $json.manual_run }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "792ae207-c525-5249-9884-a517a7666110",
+      "name": "Manual run?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        440,
+        110
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Config').first().json.databricks_host }}/api/2.2/jobs/run-now",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "databricksApi",
+        "options": {},
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ job_id: Number($('Config').first().json.job_id), job_parameters: { full_refresh: 'false' } }) }}"
+      },
+      "id": "b97d5871-3306-5b02-8c06-0a6e36fd0f60",
+      "name": "Run pipeline job",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        660,
+        0
+      ],
+      "credentials": {
+        "databricksApi": {
+          "name": "Databricks"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $('Config').first().json.databricks_host }}/api/2.2/jobs/runs/list",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "databricksApi",
+        "options": {},
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "job_id",
+              "value": "={{ $('Config').first().json.job_id }}"
+            },
+            {
+              "name": "limit",
+              "value": "={{ 1 }}"
+            }
+          ]
+        }
+      },
+      "id": "5a04d76b-ee84-5a84-a13d-ca4d628c3f20",
+      "name": "Latest job run",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        660,
+        220
+      ],
+      "credentials": {
+        "databricksApi": {
+          "name": "Databricks"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $('Config').first().json.databricks_host }}/api/2.2/jobs/runs/get",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "databricksApi",
+        "options": {},
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "run_id",
+              "value": "={{ $json.run_id ?? $json.runs[0].run_id }}"
+            }
+          ]
+        }
+      },
+      "id": "f7d2e96d-65a9-5f38-8e5d-fedf665cdcee",
+      "name": "Get job run",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        880,
+        110
+      ],
+      "credentials": {
+        "databricksApi": {
+          "name": "Databricks"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "a3fd3a03-77a8-552f-97c4-7dbd9141e758",
+              "leftValue": "={{ ['TERMINATED', 'SKIPPED', 'INTERNAL_ERROR'].includes($json.status?.state ?? $json.state?.life_cycle_state) || $runIndex >= 90 }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "dd49a33b-3b66-58c5-9cb8-3d785175c744",
+      "name": "Job finished?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1100,
+        110
+      ]
+    },
+    {
+      "parameters": {
+        "amount": 2,
+        "unit": "minutes"
+      },
+      "id": "737f23ab-9167-5ce8-a013-46daa021cd53",
+      "name": "Wait 2 min",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        1100,
+        330
+      ],
+      "webhookId": "6702ace4-6fcd-5979-be61-34475f1071ad"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "31bb5c21-d8d6-5de7-bab4-fbef5d6fed37",
+              "leftValue": "={{ ($json.status?.termination_details?.code ?? $json.state?.result_state) === 'SUCCESS' && Date.now() - $json.start_time < 26 * 3600 * 1000 }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "465bd846-1845-5f51-b0ba-4e896a772faf",
+      "name": "Succeeded this week?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1320,
+        110
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Config').first().json.databricks_host }}/api/2.0/sql/statements",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "databricksApi",
+        "options": {},
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ warehouse_id: $('Config').first().json.warehouse_id, statement: $('Config').first().json.briefing_sql, wait_timeout: '50s', on_wait_timeout: 'CONTINUE', format: 'JSON_ARRAY', disposition: 'INLINE' }) }}"
+      },
+      "id": "bbc425ff-6a96-5a94-960d-b9aa459e8a42",
+      "name": "Query briefing data",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1540,
+        0
+      ],
+      "credentials": {
+        "databricksApi": {
+          "name": "Databricks"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "41e1d6aa-6328-5d8c-a63c-835fd60dbd3f",
+              "leftValue": "={{ !['PENDING', 'RUNNING'].includes($json.status.state) || $runIndex >= 40 }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "a244b95e-5767-5136-98ac-44204b51be32",
+      "name": "Query finished?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1760,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "amount": 15,
+        "unit": "seconds"
+      },
+      "id": "4b149c8e-0532-5b6c-bcc4-f624ae7a7d02",
+      "name": "Wait 15 s",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        1760,
+        220
+      ],
+      "webhookId": "36c90aeb-f00c-592c-8f15-71da167fcec8"
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $('Config').first().json.databricks_host }}/api/2.0/sql/statements/{{ $json.statement_id }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "databricksApi",
+        "options": {}
+      },
+      "id": "b5bb8e34-7fea-5eda-97f6-7701d1c8804f",
+      "name": "Get query result",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1980,
+        220
+      ],
+      "credentials": {
+        "databricksApi": {
+          "name": "Databricks"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {
+        "jsCode": "// Every number in the briefing comes from the Gold layer (briefing.sql); the LLM only writes the text.\nconst result = $input.first().json;\nif (result.status?.state !== 'SUCCEEDED') {\n  throw new Error(`Briefing query ${result.status?.state}: ${result.status?.error?.message ?? 'no result'}`);\n}\nconst data = JSON.parse(result.result.data_array[0][0]);\nconst { language } = $('Config').first().json;\n\nconst prompt = `You are a public safety analyst writing a short weekly executive briefing for managers.\nWrite in ${language}.\nRules:\n- Use ONLY the numbers in the JSON below. Do not compute new statistics and do not guess causes.\n- CVLI = intentional lethal violent crimes (homicide, feminicide, robbery followed by death, bodily injury followed by death).\n- Rates are per 100,000 inhabitants and annualized; the analysis window goes from the month of window_start to the month of window_end.\n- lisa_cluster \"High-High\" means a high-rate municipality surrounded by high-rate neighbors (a regional cluster).\n- SINESP data come from police records sent by each state, so differences between states can also reflect reporting.\nStructure:\n1. <h3> Summary </h3> one paragraph with the national picture;\n2. <h3> Highlights </h3> 3 to 5 bullets on states and large cities that stand out and on spatial clusters;\n3. <h3> Data freshness and quality </h3> what changed in the last 7 days and names awaiting review;\n4. <h3> Suggested question </h3> one question worth asking the AI assistant next.\nOutput an HTML fragment using only <h3>, <p>, <ul>, <li> and <strong>. No markdown, no code fences.\n\nDATA:\n${JSON.stringify(data, null, 2)}`;\n\nreturn [{ json: { data, prompt } }];"
+      },
+      "id": "1f1514f7-c1e0-5410-9e59-716c3c0ba61e",
+      "name": "Build prompt",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1980,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Config').first().json.gemini_api }}/v1beta/models/{{ $('Config').first().json.gemini_model }}:generateContent",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "googlePalmApi",
+        "options": {},
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ contents: [{ role: 'user', parts: [{ text: $json.prompt }] }] }) }}"
+      },
+      "id": "972e302b-7f9b-5540-8e48-14a7202a4012",
+      "name": "Gemini - write briefing",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2200,
+        0
+      ],
+      "credentials": {
+        "googlePalmApi": {
+          "name": "Google Gemini"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {
+        "jsCode": "// The tables are built from the data, not by the LLM.\nconst response = $input.first().json;\nconst text = (response.candidates?.[0]?.content?.parts ?? []).map(p => p.text ?? '').join('')\n  .replace(/^\\s*```(?:html)?\\s*/i, '').replace(/\\s*```\\s*$/, '');\nif (!text.trim()) throw new Error('Empty answer from Gemini: ' + JSON.stringify(response).slice(0, 500));\nconst { data } = $('Build prompt').first().json;\nconst { gemini_model } = $('Config').first().json;\n\nconst esc = v => String(v ?? '').replace(/[&<>\"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '\"': '&quot;' }[c]));\nconst month = d => String(d ?? '').slice(0, 7);\nconst num = v => v == null ? '-' : Number(v).toLocaleString('pt-BR');\nconst cell = 'style=\"padding:4px 10px;border-bottom:1px solid #ddd;text-align:left\"';\nconst table = (title, header, rows) => rows.length === 0 ? '' :\n  `<h3>${esc(title)}</h3><table style=\"border-collapse:collapse;font-size:13px\"><tr>` +\n  header.map(h => `<th ${cell}>${esc(h)}</th>`).join('') + '</tr>' +\n  rows.map(r => '<tr>' + r.map(v => `<td ${cell}>${esc(v)}</td>`).join('') + '</tr>').join('') + '</table>';\n\nconst html = `<div style=\"font-family:Arial,sans-serif;max-width:760px;color:#222\">\n<h2 style=\"color:#1F4E79\">Public safety weekly briefing - ${esc(month(data.window_start))} to ${esc(month(data.window_end))}</h2>\n${text}\n${table('Highest CVLI rates by state', ['#', 'State', 'Region', 'Rate /100k', 'Victims'],\n  data.highest_state_rates.map(s => [s.rank, s.state, s.region, num(s.cvli_rate_100k), num(s.cvli_victims)]))}\n${table('Hotspots among cities with 100,000+ inhabitants', ['#', 'Municipality', 'State', 'Population', 'Rate /100k', 'LISA cluster'],\n  data.largest_city_hotspots.map(c => [c.rank, c.municipality, c.state, num(c.population), num(c.cvli_rate_100k), c.lisa_cluster]))}\n${table('Data changed in the last 7 days', ['Dataset', 'Keys'],\n  data.data_changes_last_7_days.map(c => [c.dataset, c.keys]))}\n<p style=\"font-size:12px;color:#666\">Numbers: Gold layer of the Public-Safety-Intelligence-Lakehouse (SINESP, IBGE, SENATRAN, Atlas Brasil).\nText: ${esc(gemini_model)}, instructed to use only these numbers. Sent by n8n.</p></div>`;\n\nreturn [{ json: { subject: `PSI weekly briefing - ${month(data.window_end)}`, html } }];"
+      },
+      "id": "738d381b-49bb-535d-bc4d-fff06c9f2529",
+      "name": "Build e-mail",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2420,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "fromEmail": "={{ $('Config').first().json.email_from }}",
+        "toEmail": "={{ $('Config').first().json.email_to }}",
+        "subject": "={{ $json.subject }}",
+        "emailFormat": "html",
+        "html": "={{ $json.html }}",
+        "options": {
+          "appendAttribution": false
+        }
+      },
+      "id": "e9d77a31-1f21-57c2-b74a-495170088a5b",
+      "name": "Send briefing",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [
+        2640,
+        0
+      ],
+      "credentials": {
+        "smtp": {
+          "name": "SMTP"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const run = $input.first().json;\nconst state = run.status?.state ?? run.state?.life_cycle_state ?? 'UNKNOWN';\nconst result = run.status?.termination_details?.code ?? run.state?.result_state ?? 'not finished';\nconst message = run.status?.termination_details?.message ?? run.state?.state_message ?? '';\nconst started = run.start_time ? new Date(run.start_time).toISOString() : 'unknown';\nconst stale = run.start_time && Date.now() - run.start_time >= 26 * 3600 * 1000;\nconst esc = v => String(v ?? '').replace(/[&<>\"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '\"': '&quot;' }[c]));\nconst html = `<div style=\"font-family:Arial,sans-serif\">\n<h2 style=\"color:#B00020\">PSI pipeline needs attention</h2>\n<p>${stale ? 'The latest run of the pipeline job is older than 26 hours: the weekly run did not happen.'\n           : 'The pipeline job did not finish successfully, so the weekly briefing was not sent.'}</p>\n<ul><li>Run: ${esc(run.run_id)} (started ${esc(started)})</li><li>State: ${esc(state)} - ${esc(result)}</li>\n<li>Message: ${esc(message)}</li></ul>\n${run.run_page_url ? `<p><a href=\"${esc(run.run_page_url)}\">Open the run in Databricks</a></p>` : ''}</div>`;\nreturn [{ json: { subject: `PSI pipeline alert - ${result}`, html } }];"
+      },
+      "id": "298b992d-d775-590b-adc4-e853b9294afa",
+      "name": "Build alert",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1540,
+        220
+      ]
+    },
+    {
+      "parameters": {
+        "fromEmail": "={{ $('Config').first().json.email_from }}",
+        "toEmail": "={{ $('Config').first().json.email_to }}",
+        "subject": "={{ $json.subject }}",
+        "emailFormat": "html",
+        "html": "={{ $json.html }}",
+        "options": {
+          "appendAttribution": false
+        }
+      },
+      "id": "671c45bc-ce02-589e-922f-dace475bab69",
+      "name": "Send alert",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [
+        1760,
+        440
+      ],
+      "credentials": {
+        "smtp": {
+          "name": "SMTP"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Every Monday 08:00": {
+      "main": [
+        [
+          {
+            "node": "Config",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Run manually": {
+      "main": [
+        [
+          {
+            "node": "Config",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Config": {
+      "main": [
+        [
+          {
+            "node": "Manual run?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Manual run?": {
+      "main": [
+        [
+          {
+            "node": "Run pipeline job",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Latest job run",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Run pipeline job": {
+      "main": [
+        [
+          {
+            "node": "Get job run",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Latest job run": {
+      "main": [
+        [
+          {
+            "node": "Get job run",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get job run": {
+      "main": [
+        [
+          {
+            "node": "Job finished?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Job finished?": {
+      "main": [
+        [
+          {
+            "node": "Succeeded this week?",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Wait 2 min",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait 2 min": {
+      "main": [
+        [
+          {
+            "node": "Get job run",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Succeeded this week?": {
+      "main": [
+        [
+          {
+            "node": "Query briefing data",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Build alert",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Query briefing data": {
+      "main": [
+        [
+          {
+            "node": "Query finished?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Query finished?": {
+      "main": [
+        [
+          {
+            "node": "Build prompt",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Wait 15 s",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait 15 s": {
+      "main": [
+        [
+          {
+            "node": "Get query result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get query result": {
+      "main": [
+        [
+          {
+            "node": "Query finished?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build prompt": {
+      "main": [
+        [
+          {
+            "node": "Gemini - write briefing",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gemini - write briefing": {
+      "main": [
+        [
+          {
+            "node": "Build e-mail",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build e-mail": {
+      "main": [
+        [
+          {
+            "node": "Send briefing",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build alert": {
+      "main": [
+        [
+          {
+            "node": "Send alert",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "America/Sao_Paulo",
+    "saveManualExecutions": true
+  },
+  "pinData": {},
+  "meta": {
+    "templateCredsSetupCompleted": false
+  },
+  "tags": []
+}

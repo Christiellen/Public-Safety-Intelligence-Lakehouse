@@ -4,3 +4,8 @@ __pycache__/
 .ruff_cache/
 .venv/
 reports/
+
+# local settings and secrets
+.env
+*.env
+!*.env.example

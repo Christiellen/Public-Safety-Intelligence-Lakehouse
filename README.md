@@ -301,6 +301,10 @@ databricks bundle deploy -t prod       # scheduled production job
 
 `tests/test_job_definition.py` checks the job against the notebooks themselves: every table a task reads must be written by an upstream task, and every input of `run_or_exit` must be logged upstream, so a new dependency that is not reflected in the job order fails the build. With the repository secrets `DATABRICKS_HOST` and `DATABRICKS_TOKEN`, the CI also runs `databricks bundle validate`.
 
+## Automation (n8n)
+
+[`automation/n8n`](automation/n8n/README.md) has an n8n workflow that turns the weekly run into an executive briefing: every Monday at 08:00 it checks the pipeline job through the Databricks Jobs API (or starts it, on a manual run), and when the run succeeded it queries the Gold layer through the SQL Statement Execution API ([`briefing.sql`](automation/n8n/briefing.sql)), asks Gemini to write the summary, highlights and data quality notes using only those numbers, and sends the e-mail with the data tables. A failed run, or a week without a successful run, sends an alert with the link to the run instead. Settings come from environment variables and the tokens are n8n credentials, so nothing secret is versioned; the tests check the workflow structure, the absence of secrets and run `briefing.sql` on the Gold tables.
+
 ## Tests and CI
 
 Every push and pull request runs these jobs on GitHub Actions (`.github/workflows/ci.yml`):
@@ -316,6 +320,7 @@ How it works: `tests/notebook_loader.py` executes the Databricks source files ce
 | `test_config_utils` | Name keys, text normalization, safe parsing of counts under ANSI mode |
 | `test_pipeline` | Notebooks 05-10: homonyms, alias vs fuzzy matching, unmatched names reported, measures never mixed, CVLI victims and rates, state totals |
 | `test_spatial` | Notebooks 12-13: rook contiguity (corners are not neighbors), border length, islands, LISA values, communities |
+| `test_n8n_workflow` | n8n workflow: every node connected and reachable from a trigger, settings from the environment, no tokens or e-mails in the JSON, and `briefing.sql` run on the Gold tables |
 | `test_data_dictionary` | Notebook 16: dictionary and UC comments; the quality gate fails on undocumented or removed columns; the published dictionary (`docs/data_dictionary`) matches the table |
 | `test_guards` | Notebook 17: SQL and Cypher queries that must pass and that must be blocked (writes, other schemas, other projects' nodes, table functions, multiple statements) |
 | `test_agents` | Notebook 17-19 with a fake LLM and a fake Neo4j driver: routing, parallel specialists, self-correction, answer language, model fallback, read transaction with timeout, audit log, and the evaluation notebook end to end |
