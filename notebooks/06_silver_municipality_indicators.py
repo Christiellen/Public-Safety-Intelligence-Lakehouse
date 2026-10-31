@@ -12,10 +12,19 @@
 # MAGIC | Vehicle fleet | SENATRAN | Month in `fleet_reference` |
 # MAGIC
 # MAGIC SENATRAN has no IBGE code, so its rows are matched by state + name: exact, then alias, then a conservative fuzzy match (audited in `qa_fuzzy_matches`). Names that still do not match go to `qa_unmatched_municipalities` instead of disappearing.
+# MAGIC
+# MAGIC **Incremental:** Rebuilt only when one of its sources changed. The fleet comes from the latest `_reference_month` loaded in Bronze, which keeps older months as history.
 
 # COMMAND ----------
 
 # MAGIC %run ./00_config_utils
+
+# COMMAND ----------
+
+CONSUMER = "06_silver_municipality_indicators"
+run_or_exit(CONSUMER, ["bronze_ibge_population", "bronze_ibge_gdp", "bronze_ipea_idhm", "bronze_senatran_fleet",
+                       "silver_dim_municipality"],
+            outputs=[("silver", "municipality_indicators")])
 
 # COMMAND ----------
 
@@ -90,7 +99,11 @@ idhm = (idhm_latest.groupBy("municipality_code")
 # COMMAND ----------
 
 # 4. Vehicle fleet (SENATRAN): match state + name to the IBGE code
-fleet_raw = spark.table(tbl("bronze", "bronze_senatran_fleet"))
+fleet_history = spark.table(tbl("bronze", "bronze_senatran_fleet"))
+# Bronze keeps every month loaded; the indicators use the latest one
+latest_month = fleet_history.agg(F.max("_reference_month")).first()[0]
+fleet_raw = fleet_history.filter(F.col("_reference_month") == latest_month)
+print(f"Fleet reference month: {latest_month}")
 required = {"uf", "municipio", "total"}
 missing = required - set(fleet_raw.columns)
 if missing:
@@ -126,3 +139,5 @@ print("Coverage (% of IBGE municipalities with a value):")
 coverage.show(truncate=False)
 
 write_table(indicators, "silver", "municipality_indicators")
+log_change("silver_municipality_indicators", ["all"])
+finish_step(CONSUMER)

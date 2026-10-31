@@ -20,6 +20,8 @@
 # MAGIC - *Betweenness centrality*: municipalities that act as bridges between regions of the graph (approximated with a fixed sample for speed and reproducibility).
 # MAGIC
 # MAGIC All random steps use `SEED`, so results are reproducible.
+# MAGIC
+# MAGIC **Incremental:** Recomputed only when the adjacency or the municipality analytics changed.
 
 # COMMAND ----------
 
@@ -28,6 +30,13 @@
 # COMMAND ----------
 
 # MAGIC %run ./00_config_utils
+
+# COMMAND ----------
+
+CONSUMER = "13_gold_spatial_analytics"
+run_or_exit(CONSUMER, ["silver_adjacency", "gold_municipality_analytics"],
+            outputs=[("gold", "municipality_spatial_metrics"), ("gold", "graph_communities"),
+                     ("gold", "municipality_borders")])
 
 # COMMAND ----------
 
@@ -50,7 +59,7 @@ adjacency = spark.table(tbl("silver", "municipality_adjacency")).toPandas()
 geo = spark.table(tbl("silver", "municipality_geo")).toPandas()
 
 neighbors = {code: [] for code in analytics["municipality_code"]}
-for a, b in zip(adjacency["municipality_code_a"], adjacency["municipality_code_b"]):
+for a, b in zip(adjacency["municipality_code_a"], adjacency["municipality_code_b"], strict=True):
     if a in neighbors and b in neighbors:
         neighbors[a].append(b)
         neighbors[b].append(a)
@@ -82,7 +91,7 @@ lisa_table = pd.DataFrame({
     "lisa_z_sim": np.round(lisa.z_sim, 3),
     "lisa_i": np.round(lisa.Is, 4),
     "lisa_p_value": np.round(lisa.p_sim, 4),
-    "lisa_cluster": [quadrant[q] if p < SIGNIFICANCE else "Not significant" for q, p in zip(lisa.q, lisa.p_sim)],
+    "lisa_cluster": [quadrant[q] if p < SIGNIFICANCE else "Not significant" for q, p in zip(lisa.q, lisa.p_sim, strict=True)],
 })
 
 # Empirical Bayes standardized rate (Assunção & Reis), the same transformation used by Moran_Rate.
@@ -106,7 +115,7 @@ neighborhood = pd.DataFrame({
 # 4. Graph: Louvain communities on similarity-weighted edges, and betweenness centrality
 graph = nx.Graph()
 graph.add_nodes_from(neighbors)
-for a, b, km in zip(adjacency["municipality_code_a"], adjacency["municipality_code_b"], adjacency["border_km"]):
+for a, b, km in zip(adjacency["municipality_code_a"], adjacency["municipality_code_b"], adjacency["border_km"], strict=True):
     if a in neighbors and b in neighbors:
         if a in eb_rate.index and b in eb_rate.index:
             similarity = 1.0 / (1.0 + abs(eb_rate[a] - eb_rate[b]))
@@ -157,5 +166,7 @@ write_table(nan_to_null(spark.createDataFrame(communities_summary)), "gold", "gr
 
 borders = adjacency[["municipality_code_a", "municipality_code_b", "border_km"]]
 write_table(spark.createDataFrame(borders), "gold", "municipality_borders")
+log_change("gold_spatial", ["all"])
+finish_step(CONSUMER)
 
 display(spark.table(tbl("gold", "municipality_spatial_metrics")).groupBy("lisa_cluster").count().orderBy(F.desc("count")))

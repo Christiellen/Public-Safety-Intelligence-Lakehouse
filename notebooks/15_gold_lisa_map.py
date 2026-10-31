@@ -14,6 +14,8 @@
 # MAGIC | No neighbors / No data | dark grey | Islands, or municipality without rate |
 # MAGIC
 # MAGIC Boundaries are simplified for drawing only (`SIMPLIFY_METERS`); the analysis in notebooks 12 and 13 uses the full-resolution mesh. State outlines are dissolved from the full-resolution mesh before simplification, so no gaps appear inside the states. The PNG is saved to the volume `reports` in the Gold schema.
+# MAGIC
+# MAGIC **Incremental:** the map is drawn again only when the spatial metrics changed, or when the PNG is missing.
 
 # COMMAND ----------
 
@@ -22,6 +24,14 @@
 # COMMAND ----------
 
 # MAGIC %run ./00_config_utils
+
+# COMMAND ----------
+
+import os
+
+CONSUMER = "15_gold_lisa_map"
+MAP_PATH = f"/Volumes/{CATALOG}/{SCHEMAS['gold']}/reports/lisa_cluster_map.png"
+run_or_exit(CONSUMER, ["gold_spatial"], output_missing=not os.path.exists(MAP_PATH))
 
 # COMMAND ----------
 
@@ -90,8 +100,8 @@ handles = [Patch(facecolor=COLORS[c], edgecolor="#757575", label=f"{c} ({counts.
 ax.legend(handles=handles, loc="lower left", frameon=False, fontsize=11, title="LISA cluster (5%)", title_fontsize=11)
 
 window = spark.table(tbl("gold", "municipality_analytics")).select("window_start", "window_end").first()
-ax.set_title(f"Lethal intentional violence (CVLI) — LISA clusters by municipality\n"
-             f"{window.window_start:%m/%Y} to {window.window_end:%m/%Y} · Global Moran's I (EB rate) = "
+ax.set_title(f"Lethal intentional violence (CVLI) - LISA clusters by municipality\n"
+             f"{window.window_start:%m/%Y} to {window.window_end:%m/%Y} - Global Moran's I (EB rate) = "
              f"{moran_i:.3f}, pseudo p = {moran_p:.3f}", fontsize=13, loc="left")
 ax.text(0.99, 0.01, "Sources: SINESP/MJSP, IBGE. Empirical Bayes rates, 999 permutations.",
         transform=ax.transAxes, ha="right", va="bottom", fontsize=8, color="#616161")
@@ -102,7 +112,8 @@ plt.tight_layout()
 spark.sql(f"CREATE VOLUME IF NOT EXISTS {CATALOG}.{SCHEMAS['gold']}.reports")
 local_png = "/tmp/lisa_cluster_map.png"
 fig.savefig(local_png, dpi=DPI, bbox_inches="tight", facecolor="white")
-target = f"/Volumes/{CATALOG}/{SCHEMAS['gold']}/reports/lisa_cluster_map.png"
+target = MAP_PATH
 shutil.copy(local_png, target)
+finish_step(CONSUMER)
 print(f"Saved {target}")
 plt.show()

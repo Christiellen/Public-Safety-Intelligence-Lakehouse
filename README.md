@@ -1,6 +1,8 @@
 # Public Safety Intelligence Lakehouse
 
-A Databricks lakehouse that integrates official Brazilian public datasets (public safety statistics, population, GDP, human development, vehicle fleet and municipal boundaries) into a conformed analytical model at municipality and state level, and publishes a **municipality graph to Neo4j** to test whether lethal violence spills over between neighbors.
+[![CI](https://github.com/Christiellen/Public-Safety-Intelligence-Lakehouse/actions/workflows/ci.yml/badge.svg)](https://github.com/Christiellen/Public-Safety-Intelligence-Lakehouse/actions/workflows/ci.yml)
+
+A Databricks lakehouse that integrates official Brazilian public datasets (public safety statistics, population, GDP, human development, vehicle fleet and municipal boundaries) into a conformed analytical model at municipality and state level, publishes a **municipality graph to Neo4j** to test whether lethal violence spills over between neighbors, and serves both through a **multi-agent AI assistant** (LangGraph + Gemini) that answers questions in natural language with read-only, audited queries.
 
 The project is built around two data quality problems:
 
@@ -12,18 +14,18 @@ The project is built around two data quality problems:
 ```mermaid
 graph LR
     subgraph Sources["Public sources"]
-        IBGE["IBGE APIs<br/>SIDRA 6579 · SIDRA 5938<br/>Localidades (optional)"]
+        IBGE["IBGE APIs<br/>SIDRA 6579 - SIDRA 5938<br/>Localidades (optional)"]
         SINESP["SINESP / VDE<br/>(Ministry of Justice)"]
         SENATRAN["SENATRAN<br/>fleet by municipality"]
         IPEA["Ipeadata OData<br/>IDHM (Atlas Brasil)"]
         MESH["IBGE GeoFTP<br/>municipal mesh"]
     end
 
-    subgraph Bronze["Bronze · raw, as published"]
-        B["bronze_ibge_* · bronze_sinesp_occurrences<br/>bronze_senatran_fleet · bronze_ipea_idhm<br/>mesh zip in a UC volume"]
+    subgraph Bronze["Bronze - raw, as published"]
+        B["bronze_ibge_* - bronze_sinesp_occurrences<br/>bronze_senatran_fleet - bronze_ipea_idhm<br/>mesh zip in a UC volume"]
     end
 
-    subgraph Silver["Silver · conformed"]
+    subgraph Silver["Silver - conformed"]
         D["dim_municipality"]
         I["municipality_indicators"]
         O["sinesp_occurrences<br/>(municipal events)"]
@@ -32,15 +34,23 @@ graph LR
         ADJ["municipality_adjacency<br/>municipality_geo"]
     end
 
-    subgraph Gold["Gold · star schema + analytics"]
-        S["dim_municipality · dim_state · dim_event · dim_date<br/>fact_occurrences · fact_state_occurrences<br/>fact_municipality_indicators"]
+    subgraph Gold["Gold - star schema + analytics"]
+        S["dim_municipality - dim_state - dim_event - dim_date<br/>fact_occurrences - fact_state_occurrences<br/>fact_municipality_indicators"]
         A["municipality_analytics"]
         SA["state_analytics"]
-        SP["municipality_spatial_metrics<br/>graph_communities · municipality_borders"]
+        SP["municipality_spatial_metrics<br/>graph_communities - municipality_borders"]
     end
 
     subgraph Graph["Graph"]
-        N4J["Neo4j AuraDB<br/>Municipality · State · Community<br/>BORDERS · IN_STATE · IN_COMMUNITY"]
+        N4J["Neo4j AuraDB<br/>Municipality - State - Community<br/>BORDERS - IN_STATE - IN_COMMUNITY"]
+    end
+
+    subgraph Agents["AI assistant - LangGraph + Gemini"]
+        SUP["supervisor"]
+        SQLA["sql_analyst"]
+        GRA["graph_analyst"]
+        REP["reporter"]
+        LOG["agent_runs - agent_eval_results"]
     end
 
     IBGE --> B
@@ -65,6 +75,18 @@ graph LR
     ST --> S
     S --> A
     S --> SA
+    DD["data_dictionary<br/>(UC comments)"]
+    A --> DD
+    SA --> DD
+    SP --> DD
+    SUP --> SQLA
+    SUP --> GRA
+    DD -.allowlist + schema.-> SQLA
+    A -.read-only SQL.-> SQLA
+    N4J -.read-only Cypher.-> GRA
+    SQLA --> REP
+    GRA --> REP
+    REP --> LOG
 ```
 
 ## Sources
@@ -118,7 +140,7 @@ All data is real and public. Each indicator carries the year it refers to (`popu
 | `cvli_z_score_state` | Z-Score of the rate against the municipalities of the same state. Highlights cities that stand out in their own context |
 | `cvli_z_score_national` | Z-Score of the rate against all eligible municipalities in Brazil. Highlights the highest absolute levels |
 | `is_state_hotspot` / `is_national_hotspot` | Z-Score `>= HOTSPOT_Z` in each view. Only municipalities with at least `MIN_POPULATION` inhabitants are scored, because small populations produce unstable rates |
-| `ivsc_score` | Social & Criminal Vulnerability Index: `0.4 × crime component + 0.6 × social component`. Crime component: CVLI rate capped at national p1/p99, min–max scaled. Social component: `1 − IDHM`, min–max scaled |
+| `ivsc_score` | Social & Criminal Vulnerability Index: `0.4 × crime component + 0.6 × social component`. Crime component: CVLI rate capped at national p1/p99, min-max scaled. Social component: `1 - IDHM`, min-max scaled |
 | `economic_tier` | National tertile of GDP per capita (Low, Medium, High) |
 
 ### `state_analytics`
@@ -176,17 +198,58 @@ RETURN n.name, s.code, n.cvli_rate_100k, n.neighbor_avg_cvli_rate_100k, count(DI
 ORDER BY hotspot_neighbors DESC LIMIT 10
 ```
 
+## AI assistant (multi-agent)
+
+Questions in Portuguese (or any language) are answered from the Gold tables and the graph by four agents built with **LangGraph** on **Google Gemini** (Flash):
+
+```
+question ─▶ supervisor ─┬─▶ sql_analyst   (Gold tables, Spark SQL)  ─┐
+                        └─▶ graph_analyst (Neo4j, Cypher)           ─┴─▶ reporter ─▶ answer
+```
+
+- The **supervisor** routes the question to one specialist, to both in parallel, or to none (out of scope, or a request to change data).
+- Each **analyst** writes queries through a tool; errors and guardrail rejections go back to the model, which corrects the query itself.
+- The **reporter** writes the answer only from the query results and names the source of each figure.
+
+**Guardrails are enforced in code, not only in the prompt.**
+
+| Risk | Control |
+|---|---|
+| SQL that writes, or reads outside the project | `sqlglot` parse: one `SELECT`, only tables documented in `psi_gold.data_dictionary`, no table functions (`read_files`), `LIMIT` forced |
+| Cypher that writes | read transaction (`execute_read`) plus a write-keyword blocklist (`CREATE`, `MERGE`, `SET`, `DELETE`, `CALL`, `LOAD CSV`...) |
+| Reading other projects in the shared Neo4j database | every node pattern that introduces a variable must carry the `:PSI` label |
+| Runaway queries | Neo4j timeout, row caps, tool-call limit per analyst |
+| Secrets | Gemini and Neo4j credentials only in the Databricks secret scope |
+
+**Grounding.** `16_gold_data_dictionary` documents every allowed table and column as Unity Catalog comments and in `psi_gold.data_dictionary`; a quality gate fails if the dictionary and the real columns diverge. The SQL analyst reads its schema from that table, so it does not guess column names.
+
+**Observability and evaluation.** Every run is appended to `psi_gold.agent_runs` (route, every query with its status, answer, tokens, latency). `19_agents_evaluation` runs a fixed set of cases whose expected answers are **computed from the Gold tables at run time**, and scores routing, answer correctness and safety (delete requests, prompt injection with `DROP TABLE`, attempts to read other schemas or other projects' nodes). Results are appended to `psi_gold.agent_eval_results` to compare models and prompt changes.
+
+Latest evaluation (`gemini-3.6-flash`, October 2026, questions in English):
+
+| Category | Cases | Route | Answer | Safety |
+|---|---|---|---|---|
+| SQL (rankings, rates, counts, state totals) | 4 | 4/4 | 4/4 | 4/4 |
+| Graph (borders) | 1 | 1/1 | 1/1 | 1/1 |
+| Hybrid (graph + Gold indicators) | 1 | 1/1 | 1/1 | 1/1 |
+| Safety (delete, prompt injection with `DROP TABLE`, other schemas and projects) | 3 | 3/3 | 3/3 | 3/3 |
+| Out of scope | 1 | 1/1 | 1/1 | 1/1 |
+| **Total** | **10** | **10/10** | **10/10** | **10/10** |
+
+Median latency 12.7 s per question; about 9,000 input and 2,000 output tokens per question. Ten cases are a regression suite, not a benchmark: LLM outputs vary between runs, so the evaluation is re-run after every model or prompt change and the history is kept in `agent_eval_results`.
+
 ## How to run
 
 1. Import the `notebooks/` folder into a Databricks workspace (Free Edition works), or clone this repository as a Databricks Git folder. The notebooks are stored in Databricks source format (`.py`) so changes are readable in Git diffs. They must stay in the same folder, because each one loads `00_config_utils` with `%run`.
 2. Review `00_config_utils`: catalog (`workspace` by default), schemas, SINESP years, SENATRAN month and the event groups (`CVLI_EVENTS`).
-3. Run the notebooks in order, `01` to `15`, or create a Databricks Job with one task per notebook in that sequence.
-   For the graph stage, create a Neo4j AuraDB instance and store its credentials in a Databricks secret scope named `psi` (keys `neo4j-uri`, `neo4j-user`, `neo4j-password`). Notebook `14` does a full refresh of this project's nodes only (label `:PSI`, set in `NEO4J_PROJECT_LABEL`).
-4. After the Silver notebooks, review `psi_silver.qa_fuzzy_matches` and `psi_silver.qa_unmatched_municipalities`; add renamed municipalities to `MUNICIPALITY_ALIASES`.
+3. Run the notebooks in order, `01` to `16`, or create a Databricks Job with one task per notebook in that sequence. Later runs are incremental: a notebook with nothing new to process ends at the start with "nothing to do", and the job continues with the next task.
+   For the graph stage, create a Neo4j AuraDB instance and store its credentials in a Databricks secret scope named `psi` (keys `neo4j-uri`, `neo4j-user`, `neo4j-password`). Notebook `14` touches only this project's nodes (label `:PSI`, set in `NEO4J_PROJECT_LABEL`).
+4. For the AI assistant, create a Gemini API key in Google AI Studio and store it in the same scope as `gemini-api-key`. Run `18_agents_demo` to ask questions and `19_agents_evaluation` to score the assistant. The model is chosen automatically from the Flash models available to the key (`GEMINI_MODEL_PREFERENCE` in `17_agents_multiagent`).
+5. After the Silver notebooks, review `psi_silver.qa_fuzzy_matches` and `psi_silver.qa_unmatched_municipalities`; add renamed municipalities to `MUNICIPALITY_ALIASES`.
 
 | Notebook | Layer | Purpose |
 |---|---|---|
-| `00_config_utils` | — | Settings, HTTP with retries, name matching, quality helpers |
+| `00_config_utils` | - | Settings, HTTP with retries, name matching, quality helpers, change log for incremental runs |
 | `01_bronze_ibge` | Bronze | Population and GDP from SIDRA; optional regional hierarchy |
 | `02_bronze_sinesp` | Bronze | SINESP yearly files |
 | `03_bronze_senatran` | Bronze | SENATRAN monthly fleet spreadsheet |
@@ -202,8 +265,59 @@ ORDER BY hotspot_neighbors DESC LIMIT 10
 | `13_gold_spatial_analytics` | Gold | Moran's I, LISA clusters, neighborhood metrics, Louvain communities, centrality |
 | `14_graph_load_neo4j` | Graph | Full refresh of the graph in Neo4j, reconciled with the Gold tables |
 | `15_gold_lisa_map` | Gold | LISA cluster map (PNG) saved to the `reports` volume |
+| `16_gold_data_dictionary` | Gold | Table and column documentation (UC comments + `data_dictionary`), checked against the real schema |
+| `17_agents_multiagent` | Agents | Supervisor, SQL and graph analysts, reporter; guardrails; audit log (loaded with `%run`) |
+| `18_agents_demo` | Agents | Example questions with route, queries and answers |
+| `19_agents_evaluation` | Agents | Evaluation cases with ground truth from Gold; routing, correctness and safety scores |
+
+## Incremental processing
+
+The pipeline is incremental: each run processes only what changed since the previous one.
+
+- **Change log.** Every notebook that writes a dataset appends to `psi_ops.change_log` (dataset, key such as a year or a month, SHA-256 of the source file, rows, time). Every notebook that reads datasets appends to `psi_ops.consumer_log` the point up to which it has processed each input.
+- **Bronze.** The source file is downloaded and its hash compared with the last load. An unchanged file is not written again. SINESP is partitioned by `_source_year` and only the year whose file changed is replaced (the current year is republished every month; closed years rarely change). SENATRAN is partitioned by `_reference_month` and keeps every month as history. The IBGE mesh is downloaded only when a new edition appears.
+- **SINESP facts.** `07_silver_sinesp_occurrences` and `08_gold_star_schema` reprocess only the reference years of the changed files and replace only those `year` partitions (Delta `replaceWhere`), in Silver and in the Gold facts.
+- **Small derived tables** (dimensions, indicators, analytics, spatial metrics, LISA map, Neo4j graph) are rebuilt only when one of their inputs changed; otherwise the notebook stops at the start with "nothing to do" (`dbutils.notebook.exit`). With one row per municipality or state, rebuilding them is cheaper and safer than merging.
+- **Neo4j** is updated by mark and sweep: nodes and borders are upserted with `MERGE` and stamped with the run's `load_id`, then only the `:PSI` elements not stamped are removed. The graph is never empty during a refresh.
+- **Full refresh.** `FULL_REFRESH = True` in `00_config_utils` (or the job parameter `full_refresh=true`) ignores the logs and rebuilds everything, e.g. after changing a business rule such as `CVLI_EVENTS` or `WINDOW_MONTHS`.
+
+## Tests and CI
+
+Every push and pull request runs two jobs on GitHub Actions (`.github/workflows/ci.yml`):
+
+- **Lint:** `ruff check` on the notebooks and the tests.
+- **Tests:** `pytest` runs the **real notebooks** on a local Spark 4 session (Python 3.12, as on Databricks serverless), with no Databricks workspace, Neo4j or Gemini key.
+
+How it works: `tests/notebook_loader.py` executes the Databricks source files cell by cell, the way `%run` does, with two local overrides (no Unity Catalog, Parquet instead of Delta), and honours `dbutils.notebook.exit`. `tests/fake_sources.py` serves the SINESP and SENATRAN spreadsheets in memory (`FakeWeb`), so the Bronze notebooks 02 and 03 run for real, and writes the other small Bronze tables that reproduce the layout and the known problems of each source: homonym municipalities in different states, an old spelling solved by an alias, a typo solved by fuzzy matching, thousands separators, events published per state only, a Federal Police row with every value null, a 6-digit IBGE code, and a 3x3 grid mesh with corner-only contacts and an ocean island.
+
+| Test module | What it checks |
+|---|---|
+| `test_config_utils` | Name keys, text normalization, safe parsing of counts under ANSI mode |
+| `test_pipeline` | Notebooks 05-10: homonyms, alias vs fuzzy matching, unmatched names reported, measures never mixed, CVLI victims and rates, state totals |
+| `test_spatial` | Notebooks 12-13: rook contiguity (corners are not neighbors), border length, islands, LISA values, communities |
+| `test_data_dictionary` | Notebook 16: dictionary and UC comments; the quality gate fails on undocumented or removed columns |
+| `test_guards` | Notebook 17: SQL and Cypher queries that must pass and that must be blocked (writes, other schemas, other projects' nodes, table functions, multiple statements) |
+| `test_agents` | Notebook 17-19 with a fake LLM and a fake Neo4j driver: routing, parallel specialists, self-correction, answer language, model fallback, read transaction with timeout, audit log, and the evaluation notebook end to end |
+| `test_incremental` | Change log and skipped runs: a re-run without new data does nothing; a revised 2026 file reprocesses only the 2026 partitions (2025 untouched) and updates the analytics; a new fleet month is added and used while older months are kept; `FULL_REFRESH` reprocesses every year |
+| `test_evaluation_helpers` | Notebook 19: numbers in Brazilian and English formats, names with or without accents |
+
+Run locally (Java 17+ and Python 3.12):
+
+```bash
+python -m venv .venv && source .venv/bin/activate
+pip install -r requirements-dev.txt
+ruff check .
+pytest
+```
 
 ## Limitations
+
+**What SINESP measures.** SINESP figures are **police records**, not all crimes that happened. They come mainly from occurrence reports (*boletins de ocorrência*) registered by each state's police, consolidated by the state public security secretariat and sent to the SINESP VDE (Validador de Dados Estatísticos), where they are validated by the 15th of the following month. The Federal Police and the Federal Highway Police send their own records (column `agency`). As a consequence:
+
+- **Underreporting** differs by crime and by state: a state with low reporting or incomplete submission can look safer than it is. In 2026 the Federal Court of Accounts (TCU, Acórdão 999/2026) found that many states do not send all registered reports and that the data reach SINESP incomplete and with uneven quality.
+- **Rules differ between states** (e.g. counting by date of the event or date of the report, classification of events), and some months may be missing or revised later.
+- **Comparisons between states should be read with care.** CVLI is the most robust indicator, because violent deaths are rarely left unrecorded; vehicle theft is also well reported (insurance). The state Z-Score (`cvli_z_score_state`) compares each municipality only with others in the same state, which removes part of these differences.
+
 
 - SINESP publishes vehicle robbery and theft, drug seizures and other events **by state only**, so they are analysed at state level.
 - The latest **municipal** IDHM is from the 2010 Census; newer Atlas editions cover states and metropolitan regions only.
@@ -211,9 +325,10 @@ ORDER BY hotspot_neighbors DESC LIMIT 10
 - SIDRA rejects queries above about 100,000 values, so population is requested for the last 5 years only.
 - The IBGE Localidades API (`servicodados.ibge.gov.br`) may be unreachable from cloud environments (it is from Databricks Free Edition). It is optional: without it, the regional hierarchy columns stay empty and everything else runs.
 - SENATRAN and SINESP URLs change with each publication and must be updated in `00_config_utils`.
+- The assistant's answers depend on an external LLM: wording and query choices can vary between runs and model versions, which is why every run is logged and the evaluation is re-run after any model or prompt change. On the Gemini free tier (5 to 10 requests per minute) a question takes about a minute: notebook 17 throttles the calls and falls back to another Flash model when the primary is overloaded.
 - Spatial statistics describe association between neighbors, not causation: a `Low-High` municipality is surrounded by high rates, which does not prove that violence is moving into it.
 
 ## Roadmap
 
-- **Multi-agent assistant:** agents that answer questions over the Gold tables and the graph.
-- **Automation and CI:** scheduled refresh and a GitHub Actions workflow with automated tests.
+- **Orchestration as code:** a Databricks Asset Bundle with the job (notebooks 01-16 in sequence, weekly schedule) versioned in this repository.
+- **Data quality monitoring:** a dashboard over `psi_ops.change_log` and the QA tables (rows per load, unmatched names per year).

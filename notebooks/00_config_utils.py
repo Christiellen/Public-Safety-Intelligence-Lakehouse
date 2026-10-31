@@ -10,6 +10,7 @@
 # MAGIC - HTTP download with retries and exponential backoff.
 # MAGIC - Municipality name normalization and **name + state matching to the official IBGE 7-digit code**, the single join key of the whole lakehouse.
 # MAGIC - Data quality helpers (uniqueness assertions, coverage reports).
+# MAGIC - **Incremental processing**: a change log of every dataset, so each notebook processes only what changed since its last run (details in the last section).
 
 # COMMAND ----------
 
@@ -28,7 +29,8 @@ from pyspark.sql.types import StringType, StructField, StructType
 # catalog is "workspace". Set CATALOG = None to use the legacy metastore.
 # ---------------------------------------------------------------------------
 CATALOG = "workspace"
-SCHEMAS = {"bronze": "psi_bronze", "silver": "psi_silver", "gold": "psi_gold"}
+SCHEMAS = {"bronze": "psi_bronze", "silver": "psi_silver", "gold": "psi_gold",
+           "ops": "psi_ops"}   # ops: change log and processing control of the pipeline
 TABLE_FORMAT = "delta"
 HTTP_TIMEOUT = (20, 180)   # (connect, read) seconds: unreachable hosts fail fast
 
@@ -143,7 +145,7 @@ def http_get(url: str, retries: int = 3, backoff_seconds: int = 5, allow_insecur
             response = requests.get(url, timeout=HTTP_TIMEOUT)
             response.raise_for_status()
             return response
-        except requests.exceptions.SSLError as error:
+        except requests.exceptions.SSLError:
             if not allow_insecure_fallback:
                 raise
             import urllib3
@@ -407,3 +409,159 @@ def write_unmatched(unmatched: DataFrame, source: str) -> None:
     print(f"Unmatched names for {source}: {unmatched.count():,}")
     fuzzy = spark.table(tbl("silver", "qa_fuzzy_matches")).filter(F.col("source") == source)
     print(f"Fuzzy matches for {source}: {fuzzy.count():,} (review in {tbl('silver', 'qa_fuzzy_matches')})")
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## Incremental processing
+# MAGIC
+# MAGIC Every notebook that writes a dataset records it in **`psi_ops.change_log`** (dataset, key such as a year or a month, content hash, rows, time). Every notebook that reads datasets records in **`psi_ops.consumer_log`** up to which change it has processed. With the two logs:
+# MAGIC
+# MAGIC | Layer | Behaviour on a new run |
+# MAGIC |---|---|
+# MAGIC | Bronze | Downloads the source and compares the **SHA-256 of the file** with the last load. Unchanged files are not written again. SINESP is stored by year (`_source_year`) and SENATRAN by month (`_reference_month`): only the changed year or month is replaced, and older months are kept as history. |
+# MAGIC | Silver and Gold facts | SINESP occurrences are reprocessed **only for the years that changed** (`replace_partitions`), in Silver and in the Gold facts. |
+# MAGIC | Small derived tables | Dimensions, indicators, analytics, spatial metrics and the Neo4j graph are rebuilt only when one of their inputs changed; otherwise the notebook ends at the start with "nothing to do" (`run_or_exit`). They are small (one row per municipality or state), so rebuilding them is cheaper and safer than merging. |
+# MAGIC
+# MAGIC **Full refresh.** `FULL_REFRESH = True` (or the job parameter `full_refresh=true`) ignores the logs and rebuilds everything, e.g. after changing a business rule such as `CVLI_EVENTS` or `WINDOW_MONTHS`, which does not change any input data.
+
+# COMMAND ----------
+
+import hashlib
+from datetime import datetime, timezone
+
+FULL_REFRESH = False
+try:  # job parameter or notebook widget "full_refresh", when defined
+    FULL_REFRESH = dbutils.widgets.get("full_refresh").strip().lower() == "true"
+except Exception:
+    pass
+
+CHANGE_LOG = "change_log"
+CONSUMER_LOG = "consumer_log"
+_CHANGE_LOG_SCHEMA = "dataset string, key string, content_sha256 string, rows bigint, changed_at timestamp"
+_CONSUMER_LOG_SCHEMA = "consumer string, dataset string, consumed_until timestamp, consumed_at timestamp"
+_HIGH_WATER = {}   # consumer -> {dataset: latest changed_at read at the start of the run}
+
+
+def sha256(content: bytes) -> str:
+    return hashlib.sha256(content).hexdigest()
+
+
+def _ops_table(name: str):
+    target = tbl("ops", name)
+    return spark.table(target) if spark.catalog.tableExists(target) else None
+
+
+def _append_ops(rows: list, schema: str, name: str) -> None:
+    spark.sql(f"CREATE SCHEMA IF NOT EXISTS {CATALOG}.{SCHEMAS['ops']}" if CATALOG
+              else f"CREATE SCHEMA IF NOT EXISTS {SCHEMAS['ops']}")
+    (spark.createDataFrame(rows, schema).write.format(TABLE_FORMAT).mode("append")
+     .saveAsTable(tbl("ops", name)))
+
+
+def is_unchanged(dataset: str, key, content_sha256: str) -> bool:
+    """True when the last load of this dataset and key had the same content hash."""
+    log = _ops_table(CHANGE_LOG)
+    if FULL_REFRESH or log is None:
+        return False
+    last = (log.filter((F.col("dataset") == dataset) & (F.col("key") == str(key)))
+            .orderBy(F.desc("changed_at")).select("content_sha256").first())
+    return last is not None and last.content_sha256 == content_sha256
+
+
+def log_change(dataset: str, keys, content_sha256: str = None, rows: int = None) -> None:
+    """Records that `keys` of `dataset` were (re)written now."""
+    now = datetime.now(timezone.utc)
+    _append_ops([(dataset, str(k), content_sha256, rows, now) for k in keys], _CHANGE_LOG_SCHEMA, CHANGE_LOG)
+
+
+def changes_since_last_run(consumer: str, datasets: list) -> dict:
+    """Keys changed in each input dataset since `consumer` last finished ({dataset: [keys]}).
+    With FULL_REFRESH, every key ever logged. The high-water mark read here is the one that
+    finish_step() records, so a change that arrives during the run is processed next time."""
+    log = _ops_table(CHANGE_LOG)
+    consumed = None if FULL_REFRESH else _ops_table(CONSUMER_LOG)
+    pending, marks = {}, {}
+    for dataset in datasets:
+        changes = log.filter(F.col("dataset") == dataset) if log is not None else None
+        if changes is None:
+            pending[dataset], marks[dataset] = [], None
+            continue
+        marks[dataset] = changes.agg(F.max("changed_at")).first()[0]
+        if consumed is not None:
+            last = (consumed.filter((F.col("consumer") == consumer) & (F.col("dataset") == dataset))
+                    .agg(F.max("consumed_until")).first()[0])
+            if last is not None:
+                changes = changes.filter(F.col("changed_at") > F.lit(last))
+        pending[dataset] = sorted({r.key for r in changes.select("key").distinct().collect()})
+    _HIGH_WATER[consumer] = marks
+    return pending
+
+
+def finish_step(consumer: str) -> None:
+    """Records that `consumer` processed its inputs up to the high-water mark of this run."""
+    now = datetime.now(timezone.utc)
+    rows = [(consumer, dataset, mark, now) for dataset, mark in _HIGH_WATER.pop(consumer, {}).items()
+            if mark is not None]
+    if rows:
+        _append_ops(rows, _CONSUMER_LOG_SCHEMA, CONSUMER_LOG)
+
+
+def run_or_exit(consumer: str, datasets: list, outputs: list = (), output_missing: bool = False) -> dict:
+    """Start of a notebook that derives tables from `datasets`. Returns the changed keys per input.
+    When nothing changed and every output exists, the notebook ends here (dbutils.notebook.exit).
+    `outputs` are (layer, table) pairs; `output_missing` covers outputs that are not tables."""
+    pending = changes_since_last_run(consumer, datasets)
+    missing = output_missing or any(not spark.catalog.tableExists(tbl(*o)) for o in outputs)
+    changed = {d: keys for d, keys in pending.items() if keys}
+    if FULL_REFRESH or missing or changed:
+        reason = "full refresh" if FULL_REFRESH else "output missing" if missing else f"changes: {changed}"
+        print(f"{consumer}: processing ({reason})")
+        return pending
+    message = f"{consumer}: no changes in {', '.join(datasets)} since the last run; nothing to do."
+    print(message)
+    dbutils.notebook.exit(message)
+
+
+def replace_partitions(df: DataFrame, layer: str, name: str, column: str, values) -> str:
+    """Writes `df` replacing only the partitions `column IN values` (e.g. the SINESP years that
+    changed); the other partitions are kept. Creates the table on the first run, rewrites it with
+    FULL_REFRESH, and merges the new columns when the schema changes."""
+    target = tbl(layer, name)
+    values = sorted(set(values))
+    if FULL_REFRESH or not spark.catalog.tableExists(target):
+        return write_table(df, layer, name, partition_by=[column])
+    existing = spark.table(target)
+    if column not in existing.columns:
+        print(f"WARNING {target}: table without the partition column `{column}` (created by an earlier version); "
+              f"rewritten with the data of this run ({column} in {values}). Run with FULL_REFRESH if other values are missing.")
+        return write_table(df, layer, name, partition_by=[column])
+    if set(existing.columns) != set(df.columns):
+        print(f"{target}: schema changed; rewriting it with the other partitions kept")
+        df = existing.filter(~F.col(column).isin(values)).unionByName(df, allowMissingColumns=True)
+        if TABLE_FORMAT != "delta":   # Parquet (local tests) cannot overwrite a table it is reading
+            df = spark.createDataFrame(df.collect(), df.schema)
+        return write_table(df, layer, name, partition_by=[column])
+    if TABLE_FORMAT == "delta":
+        literals = ", ".join(f"'{v}'" if isinstance(v, str) else str(v) for v in values)
+        (df.write.format("delta").mode("overwrite").option("replaceWhere", f"{column} IN ({literals})")
+         .saveAsTable(target))
+    else:                             # Parquet (local tests): dynamic partition overwrite
+        spark.conf.set("spark.sql.sources.partitionOverwriteMode", "dynamic")
+        df.select(*existing.columns).write.insertInto(target, overwrite=True)
+    print(f"Saved {target}: partitions {column} in {values} replaced; {spark.table(target).count():,} rows in total")
+    return target
+
+
+def write_if_changed(name: str, content: bytes, build) -> bool:
+    """Bronze table loaded from a single source response: written (and logged) only when the
+    content hash differs from the last load. `build` returns the DataFrame. Returns True if written."""
+    digest = sha256(content)
+    if is_unchanged(name, "all", digest) and spark.catalog.tableExists(tbl("bronze", name)):
+        print(f"{name}: source unchanged since the last load, skipped")
+        return False
+    df = build()
+    rows = assert_not_empty(df, name)
+    write_table(df, "bronze", name)
+    log_change(name, ["all"], digest, rows)
+    return True

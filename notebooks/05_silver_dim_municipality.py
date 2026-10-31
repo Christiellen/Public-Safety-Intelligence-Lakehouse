@@ -9,10 +9,18 @@
 # MAGIC **Why this matters.** Brazil has many municipalities with the same name in different states (e.g. *Bom Jesus* exists in five states). Joining by name alone silently attaches one city's population to another. Here the name is used only once, to match sources that do not carry the IBGE code (SINESP, SENATRAN), and always together with the state.
 # MAGIC
 # MAGIC `name_key` (letters and digits only) is the matching key, and it must be unique within each state.
+# MAGIC
+# MAGIC **Incremental:** Rebuilt (one row per municipality) only when the IBGE population or Localidades load changed.
 
 # COMMAND ----------
 
 # MAGIC %run ./00_config_utils
+
+# COMMAND ----------
+
+CONSUMER = "05_silver_dim_municipality"
+run_or_exit(CONSUMER, ["bronze_ibge_population", "bronze_ibge_municipalities"],
+            outputs=[("silver", "dim_municipality")])
 
 # COMMAND ----------
 
@@ -89,4 +97,6 @@ if broken_aliases.count():
     print("WARNING: aliases above point to names that do not exist in IBGE; review MUNICIPALITY_ALIASES.")
 
 write_table(dim_municipality, "silver", "dim_municipality")
+log_change("silver_dim_municipality", ["all"])
+finish_step(CONSUMER)
 display(spark.table(tbl("silver", "dim_municipality")).groupBy("region_name").count().orderBy("region_name"))

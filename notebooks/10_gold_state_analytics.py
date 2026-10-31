@@ -12,10 +12,18 @@
 # MAGIC | `drug_seizure_kg` | Seized drugs in kg, all reporting agencies, in the window |
 # MAGIC
 # MAGIC Window and annualization follow `09_gold_municipality_analytics`. Population and fleet are the sums of the municipalities of each state.
+# MAGIC
+# MAGIC **Incremental:** Recomputed only when the Gold facts or dimensions changed.
 
 # COMMAND ----------
 
 # MAGIC %run ./00_config_utils
+
+# COMMAND ----------
+
+CONSUMER = "10_gold_state_analytics"
+run_or_exit(CONSUMER, ["gold_facts", "gold_dimensions"],
+            outputs=[("gold", "state_analytics")])
 
 # COMMAND ----------
 
@@ -61,4 +69,6 @@ state_analytics = (dim_state
 
 assert_unique(state_analytics, ["state_code"], "gold.state_analytics")
 write_table(state_analytics, "gold", "state_analytics")
+log_change("gold_state_analytics", ["all"])
+finish_step(CONSUMER)
 display(spark.table(tbl("gold", "state_analytics")).orderBy(F.desc("cvli_rate_100k")))

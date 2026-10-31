@@ -14,19 +14,27 @@
 # MAGIC
 # MAGIC A municipality is flagged when `z ≥ HOTSPOT_Z`.
 # MAGIC
-# MAGIC **IVSC (Social & Criminal Vulnerability Index).** `0.4 × crime component + 0.6 × social component`, both rescaled to 0–1 before weighting:
-# MAGIC - crime component: CVLI rate, capped at the national 1st and 99th percentiles, then min–max scaled;
-# MAGIC - social component: `1 − IDHM`, min–max scaled.
+# MAGIC **IVSC (Social & Criminal Vulnerability Index).** `0.4 × crime component + 0.6 × social component`, both rescaled to 0-1 before weighting:
+# MAGIC - crime component: CVLI rate, capped at the national 1st and 99th percentiles, then min-max scaled;
+# MAGIC - social component: `1 - IDHM`, min-max scaled.
 # MAGIC
-# MAGIC Without rescaling, a rate in the tens would dominate an index in the 0–1 range. IDHM refers to 2010 (latest municipal edition).
+# MAGIC Without rescaling, a rate in the tens would dominate an index in the 0-1 range. IDHM refers to 2010 (latest municipal edition).
 # MAGIC
 # MAGIC **Economic tier.** National tertiles of GDP per capita.
 # MAGIC
 # MAGIC Vehicle crimes are published by SINESP at state level only, so they are analysed in `10_gold_state_analytics`.
+# MAGIC
+# MAGIC **Incremental:** Recomputed only when the Gold facts or dimensions changed. The window moves with the data, so the table is rebuilt (5,570 rows) rather than merged. A change of `WINDOW_MONTHS`, `MIN_POPULATION` or `HOTSPOT_Z` needs `FULL_REFRESH`.
 
 # COMMAND ----------
 
 # MAGIC %run ./00_config_utils
+
+# COMMAND ----------
+
+CONSUMER = "09_gold_municipality_analytics"
+run_or_exit(CONSUMER, ["gold_facts", "gold_dimensions"],
+            outputs=[("gold", "municipality_analytics")])
 
 # COMMAND ----------
 
@@ -138,6 +146,8 @@ analytics = (analytics.join(with_gdp, "municipality_code", "left")
 
 assert_unique(analytics, ["municipality_code"], "gold.municipality_analytics")
 write_table(analytics, "gold", "municipality_analytics")
+log_change("gold_municipality_analytics", ["all"])
+finish_step(CONSUMER)
 
 result = spark.table(tbl("gold", "municipality_analytics"))
 result.agg(

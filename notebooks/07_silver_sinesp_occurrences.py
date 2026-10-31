@@ -15,10 +15,23 @@
 # MAGIC **Outputs**
 # MAGIC - `sinesp_occurrences`: municipal-level events matched to the IBGE code. Rows with municipality not informed, or with a name that does not match, are reported (the latter in `qa_unmatched_municipalities`).
 # MAGIC - `sinesp_state_occurrences`: every valid row aggregated by state, which gives complete state totals for all events.
+# MAGIC
+# MAGIC Both are partitioned by `year` (year of the reference month).
+# MAGIC
+# MAGIC **Incremental.** Only the reference years present in the SINESP files that changed in Bronze are reprocessed, and only their partitions are replaced (`replace_partitions`); the other years stay as they are. Everything is reprocessed when the municipality dimension changed (the name matching depends on it), with `FULL_REFRESH`, or on the first run. The level of detail is detected on the years being processed. Name-matching QA is kept per source and year (`SINESP 2026`), so reprocessing one year does not erase the QA of the others.
 
 # COMMAND ----------
 
 # MAGIC %run ./00_config_utils
+
+# COMMAND ----------
+
+CONSUMER = "07_silver_sinesp_occurrences"
+OUTPUTS = ["sinesp_occurrences", "sinesp_state_occurrences"]
+pending = run_or_exit(CONSUMER, ["bronze_sinesp_occurrences", "silver_dim_municipality"],
+                      outputs=[("silver", name) for name in OUTPUTS])
+reprocess_all = (FULL_REFRESH or bool(pending["silver_dim_municipality"])
+                 or not all(spark.catalog.tableExists(tbl("silver", name)) for name in OUTPUTS))
 
 # COMMAND ----------
 
@@ -44,7 +57,22 @@ rows = (raw
             F.to_date(F.try_to_timestamp(date_text, F.lit("dd/MM/yyyy")))), "month"))
         .withColumn("event_name", normalize_text(F.col("evento")))
         .withColumn("agency", F.coalesce(F.trim("abrangencia"), F.lit("Não informado")))
-        .withColumn("state_code", F.upper(F.trim("uf"))))
+        .withColumn("state_code", F.upper(F.trim("uf")))
+        .withColumn("year", F.year("reference_date")))
+
+# Reference years to process: all, or those present in the SINESP files that changed in Bronze
+if reprocess_all:
+    years = sorted(r.year for r in rows.select("year").distinct().collect() if r.year is not None)
+    print(f"Reprocessing every year: {years}")
+else:
+    changed_files = pending["bronze_sinesp_occurrences"]
+    years = sorted(r.year for r in rows.filter(F.col("_source_year").isin(changed_files))
+                   .select("year").distinct().collect() if r.year is not None)
+    rows = rows.filter(F.col("year").isin(years))
+    print(f"Changed SINESP files: {changed_files} -> reference years to reprocess: {years}")
+if not years:
+    finish_step(CONSUMER)
+    dbutils.notebook.exit("The changed SINESP files have no valid reference month; nothing to do.")
 
 invalid = rows.filter(F.col("value").isNull() | F.col("reference_date").isNull())
 print(f"Rows without value or date (excluded): {invalid.count():,}")
@@ -70,11 +98,12 @@ valid = valid.join(F.broadcast(level), ["event_name", "agency"])
 level.orderBy("event_level", "event_name", "agency").show(100, truncate=False)
 
 # 1. State totals: every valid row, all events
-state_occurrences = (valid.groupBy("state_code", "event_name", "agency", "event_level", "measure_type", "reference_date")
+state_occurrences = (valid.groupBy("state_code", "event_name", "agency", "event_level", "measure_type",
+                                   "reference_date", "year")
                      .agg(F.sum("value").alias("value")))
 assert_unique(state_occurrences, ["state_code", "event_name", "agency", "measure_type", "reference_date"],
               "sinesp_state_occurrences")
-write_table(state_occurrences, "silver", "sinesp_state_occurrences")
+replace_partitions(state_occurrences, "silver", "sinesp_state_occurrences", "year", years)
 
 # COMMAND ----------
 
@@ -84,16 +113,28 @@ is_not_informed = F.col("municipio").isNull() | name_key(F.col("municipio")).isi
 not_informed = municipal.filter(is_not_informed)
 print(f"Municipal-event rows with municipality not informed (kept in state totals only): {not_informed.count():,}")
 
-matched, unmatched = match_municipalities(municipal.filter(~is_not_informed).drop("state_code"),
-                                          "uf", "municipio", dim, "SINESP")
-write_unmatched(unmatched, "SINESP")
+# Matched per year, so the QA of each year (source "SINESP <year>") is replaced only with that year
+if reprocess_all:  # remove QA rows of the former layout (one "SINESP" source for every year)
+    for qa_table in ["qa_unmatched_municipalities", "qa_fuzzy_matches"]:
+        if spark.catalog.tableExists(tbl("silver", qa_table)):
+            write_source_qa(spark.table(tbl("silver", qa_table)).limit(0), qa_table, "SINESP")
+to_match = municipal.filter(~is_not_informed).drop("state_code")
+matched = None
+for year in years:
+    matched_year, unmatched_year = match_municipalities(to_match.filter(F.col("year") == year),
+                                                        "uf", "municipio", dim, f"SINESP {year}")
+    write_unmatched(unmatched_year, f"SINESP {year}")
+    matched = matched_year if matched is None else matched.unionByName(matched_year)
 
 occurrences = (matched
-               .groupBy("municipality_code", "state_code", "event_name", "agency", "measure_type", "reference_date")
+               .groupBy("municipality_code", "state_code", "event_name", "agency", "measure_type", "reference_date",
+                        "year")
                .agg(F.sum("value").cast("long").alias("count")))
 assert_unique(occurrences, ["municipality_code", "event_name", "agency", "measure_type", "reference_date"],
               "sinesp_occurrences")
-write_table(occurrences, "silver", "sinesp_occurrences")
+replace_partitions(occurrences, "silver", "sinesp_occurrences", "year", years)
+log_change("silver_sinesp", years)
+finish_step(CONSUMER)
 
 missing_cvli = set(CVLI_EVENTS) - {r.event_name for r in occurrences.select("event_name").distinct().collect()}
 if missing_cvli:

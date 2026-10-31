@@ -15,12 +15,12 @@
 # MAGIC
 # MAGIC **Project isolation.** AuraDB Free has a single database, which other projects may share. Every node of this project therefore carries the extra label `NEO4J_PROJECT_LABEL` (`PSI`) and a unique key `psi_key` (`Municipality:3550308`, `State:SP`, `Community:12`):
 # MAGIC - the uniqueness constraint is on `(:PSI {psi_key})`, so it does not collide with a `Municipality` label used by another project;
-# MAGIC - the refresh deletes only `:PSI` nodes;
+# MAGIC - the refresh deletes only stale `:PSI` nodes;
 # MAGIC - every query in this project matches `:PSI` first.
 # MAGIC
-# MAGIC **Load strategy:** full refresh of the project's nodes, removed in batches, then loaded with `UNWIND` in batches of `BATCH_SIZE`. Counts in Neo4j are checked against the Gold tables at the end.
+# MAGIC **Load strategy (incremental, mark and sweep):** every node and `BORDERS` relationship is upserted with `MERGE` and stamped with the `load_id` of this run; afterwards, only the `:PSI` nodes and borders that were **not** stamped (municipalities or borders that no longer exist, communities that disappeared) are removed, in batches. The graph is never empty during a refresh, and nothing outside `:PSI` is touched. The notebook runs only when the Gold spatial tables, the analytics or the dimensions changed (`run_or_exit`). Counts in Neo4j are checked against the Gold tables at the end.
 # MAGIC
-# MAGIC The refresh deletes every `:PSI` node and its relationships, including relationships that other projects may have created towards them.
+# MAGIC ⚠️ A stale `:PSI` node is removed with all its relationships, including relationships that other projects may have created towards it.
 # MAGIC
 # MAGIC Credentials come from the secret scope `NEO4J_SECRET_SCOPE` (keys `neo4j-uri`, `neo4j-user`, `neo4j-password`).
 
@@ -33,6 +33,13 @@
 # MAGIC %run ./00_config_utils
 
 # COMMAND ----------
+
+CONSUMER = "14_graph_load_neo4j"
+run_or_exit(CONSUMER, ["gold_spatial", "gold_municipality_analytics", "gold_dimensions"])
+
+# COMMAND ----------
+
+import uuid
 
 import numpy as np
 from neo4j import GraphDatabase
@@ -70,10 +77,21 @@ def clean(records):
     return [{k: to_neo4j(v) for k, v in r.items()} for r in records]
 
 
-def run_batches(driver, query, rows, label):
+def run_batches(driver, query, rows, label, **params):
     for start in range(0, len(rows), BATCH_SIZE):
-        driver.execute_query(cypher(query), rows=rows[start:start + BATCH_SIZE])
-    print(f"{label}: {len(rows):,}")
+        driver.execute_query(cypher(query), rows=rows[start:start + BATCH_SIZE], **params)
+    print(f"{label}: {len(rows):,} upserted")
+
+
+def sweep(driver, query, label, **params):
+    """Deletes in batches what the query matches (keeps transactions small on AuraDB Free)."""
+    removed = 0
+    while True:
+        batch = driver.execute_query(cypher(query), **params).records[0]["removed"]
+        removed += batch
+        if batch == 0:
+            break
+    print(f"{label}: {removed:,} removed")
 
 
 municipalities = (spark.table(tbl("gold", "municipality_analytics"))
@@ -104,49 +122,58 @@ with GraphDatabase.driver(uri, auth=auth) as driver:
     driver.execute_query(cypher(
         "CREATE CONSTRAINT __P___key IF NOT EXISTS FOR (n:__P__) REQUIRE n.psi_key IS UNIQUE"))
 
-    # Full refresh of this project only, in batches (keeps transactions small on AuraDB Free)
-    deleted = 0
-    while True:
-        batch = driver.execute_query(cypher(
-            "MATCH (n:__P__) WITH n LIMIT 5000 DETACH DELETE n RETURN count(*) AS deleted")).records[0]["deleted"]
-        deleted += batch
-        if batch == 0:
-            break
-    print(f"Previous {P} nodes removed: {deleted:,}")
+    load_id = str(uuid.uuid4())   # stamp of this run: anything without it at the end is stale
+    print(f"load_id {load_id}")
 
     run_batches(driver, """
         UNWIND $rows AS r
         MERGE (s:__P__ {psi_key: 'State:' + r.state_code})
-        SET s:State, s.code = r.state_code, s.name = r.state_name, s.region = r.region_name
-    """, state_rows, "States")
+        SET s:State, s.code = r.state_code, s.name = r.state_name, s.region = r.region_name, s.load_id = $load_id
+    """, state_rows, "States", load_id=load_id)
 
     run_batches(driver, """
         UNWIND $rows AS r
         MERGE (c:__P__ {psi_key: 'Community:' + toString(r.community_id)})
         SET c:Community, c.id = r.community_id, c.municipalities = r.municipalities, c.states = r.states,
-            c.population = r.population, c.cvli_victims = r.cvli_victims, c.cvli_rate_100k = r.cvli_rate_100k
-    """, community_rows, "Communities")
+            c.population = r.population, c.cvli_victims = r.cvli_victims, c.cvli_rate_100k = r.cvli_rate_100k,
+            c.load_id = $load_id
+    """, community_rows, "Communities", load_id=load_id)
 
+    # State and community links are rebuilt for each municipality, since its community can change
     run_batches(driver, """
         UNWIND $rows AS r
         MERGE (m:__P__ {psi_key: 'Municipality:' + r.code})
-        SET m:Municipality, m += r
+        SET m:Municipality, m += r, m.load_id = $load_id
         REMOVE m.state_code, m.region_name, m.community_id
         WITH m, r
+        OPTIONAL MATCH (m)-[old:IN_STATE|IN_COMMUNITY]->()
+        DELETE old
+        WITH DISTINCT m, r
         MATCH (s:__P__ {psi_key: 'State:' + r.state_code})
         MERGE (m)-[:IN_STATE]->(s)
         WITH m, r
         MATCH (c:__P__ {psi_key: 'Community:' + toString(r.community_id)})
         MERGE (m)-[:IN_COMMUNITY]->(c)
-    """, municipality_rows, "Municipalities")
+    """, municipality_rows, "Municipalities", load_id=load_id)
 
     run_batches(driver, """
         UNWIND $rows AS r
         MATCH (a:__P__ {psi_key: 'Municipality:' + r.municipality_code_a})
         MATCH (b:__P__ {psi_key: 'Municipality:' + r.municipality_code_b})
         MERGE (a)-[e:BORDERS]-(b)
-        SET e.border_km = r.border_km
-    """, border_rows, "Borders")
+        SET e.border_km = r.border_km, e.load_id = $load_id
+    """, border_rows, "Borders", load_id=load_id)
+
+    # Sweep: only this project's elements that were not stamped by this run
+    sweep(driver, """
+        MATCH (:__P__:Municipality)-[e:BORDERS]-(:__P__:Municipality)
+        WHERE e.load_id IS NULL OR e.load_id <> $load_id
+        WITH DISTINCT e LIMIT 5000 DELETE e RETURN count(*) AS removed
+    """, "Stale borders", load_id=load_id)
+    sweep(driver, """
+        MATCH (n:__P__) WHERE n.load_id IS NULL OR n.load_id <> $load_id
+        WITH n LIMIT 5000 DETACH DELETE n RETURN count(*) AS removed
+    """, "Stale nodes", load_id=load_id)
 
     # Reconciliation with the Gold tables
     counts = driver.execute_query(cypher("""
@@ -164,6 +191,9 @@ with GraphDatabase.driver(uri, auth=auth) as driver:
         print(f"{status} {key}: Neo4j {counts[key]:,} | Gold {value:,}")
     if any(counts[k] != v for k, v in expected.items()):
         raise AssertionError("Neo4j counts differ from the Gold tables")
+
+log_change("neo4j_graph", [load_id])
+finish_step(CONSUMER)
 
 # COMMAND ----------
 

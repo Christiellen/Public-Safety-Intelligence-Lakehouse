@@ -14,6 +14,8 @@
 # MAGIC - `municipality_geo`: centroid (lat/lon), area and number of neighbors per municipality. Municipalities with no neighbor (e.g. ocean islands such as Fernando de Noronha) are kept, with `neighbor_count = 0`.
 # MAGIC
 # MAGIC Every code in the mesh must exist in `dim_municipality`, and vice versa; differences are reported.
+# MAGIC
+# MAGIC **Incremental:** Recomputed only when a new mesh edition was loaded or the municipality dimension changed (borders change about once a year).
 
 # COMMAND ----------
 
@@ -22,6 +24,12 @@
 # COMMAND ----------
 
 # MAGIC %run ./00_config_utils
+
+# COMMAND ----------
+
+CONSUMER = "12_silver_municipality_adjacency"
+run_or_exit(CONSUMER, ["bronze_ibge_mesh", "silver_dim_municipality"],
+            outputs=[("silver", "municipality_adjacency"), ("silver", "municipality_geo")])
 
 # COMMAND ----------
 
@@ -98,3 +106,5 @@ assert_unique(df_adjacency, ["municipality_code_a", "municipality_code_b"], "mun
 assert_unique(df_geo, ["municipality_code"], "municipality_geo")
 write_table(df_adjacency, "silver", "municipality_adjacency")
 write_table(df_geo, "silver", "municipality_geo")
+log_change("silver_adjacency", ["all"])
+finish_step(CONSUMER)

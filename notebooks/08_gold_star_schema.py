@@ -10,15 +10,31 @@
 # MAGIC | `dim_state` | Dimension | `state_code` |
 # MAGIC | `dim_event` | Dimension | `event_id` (stable hash of the normalized event name), with event groups (CVLI, vehicle crime, drug seizure) and level of detail |
 # MAGIC | `dim_date` | Dimension | `date_id` (yyyyMMdd, first day of month) |
-# MAGIC | `fact_occurrences` | Fact (monthly) | municipality × event × agency × month × measure type — municipal-level events only |
-# MAGIC | `fact_state_occurrences` | Fact (monthly) | state × event × agency × month × measure type — all events |
+# MAGIC | `fact_occurrences` | Fact (monthly) | municipality × event × agency × month × measure type - municipal-level events only |
+# MAGIC | `fact_state_occurrences` | Fact (monthly) | state × event × agency × month × measure type - all events |
 # MAGIC | `fact_municipality_indicators` | Fact (snapshot) | municipality |
 # MAGIC
 # MAGIC `event_id` is a hash, not a sequence, so it stays the same across reloads.
+# MAGIC
+# MAGIC **Incremental.** The two SINESP facts are partitioned by `year` and only the years reprocessed by `07_silver_sinesp_occurrences` are replaced. The dimensions and the indicator snapshot are small and are rebuilt whenever this notebook runs. Downstream notebooks are notified through the change log (`gold_facts` by year, `gold_dimensions`).
 
 # COMMAND ----------
 
 # MAGIC %run ./00_config_utils
+
+# COMMAND ----------
+
+CONSUMER = "08_gold_star_schema"
+FACTS = ["fact_occurrences", "fact_state_occurrences"]
+pending = run_or_exit(CONSUMER, ["silver_sinesp", "silver_dim_municipality", "silver_municipality_indicators"],
+                      outputs=[("gold", name) for name in ["dim_municipality", "dim_state", "dim_event", "dim_date",
+                                                          "fact_municipality_indicators", *FACTS]])
+if FULL_REFRESH or not all(spark.catalog.tableExists(tbl("gold", name)) for name in FACTS):
+    fact_years = sorted(r.year for r in spark.table(tbl("silver", "sinesp_state_occurrences")).select("year")
+                        .distinct().collect())
+else:
+    fact_years = sorted(int(year) for year in pending["silver_sinesp"])
+print(f"Fact years to replace: {fact_years or 'none (only dimensions and indicators are rebuilt)'}")
 
 # COMMAND ----------
 
@@ -67,27 +83,34 @@ dim_date = (state_occurrences.select(F.col("reference_date").alias("date")).dist
                     F.date_format("date", "yyyy-MM").alias("year_month")))
 write_table(dim_date, "gold", "dim_date")
 
-# fact_occurrences (municipal level)
-fact_occurrences = (occurrences
+# fact_occurrences (municipal level): only the years that changed
+fact_occurrences = (occurrences.filter(F.col("year").isin(fact_years))
                     .withColumn("event_id", F.xxhash64("event_name"))
                     .withColumn("date_id", F.date_format("reference_date", "yyyyMMdd").cast("int"))
-                    .select("municipality_code", "event_id", "agency", "date_id", "measure_type", "count"))
+                    .select("municipality_code", "event_id", "agency", "date_id", "measure_type", "count", "year"))
 keys = ["municipality_code", "event_id", "agency", "date_id", "measure_type"]
 assert_unique(fact_occurrences, keys, "gold.fact_occurrences")
 orphans = fact_occurrences.join(dim_municipality, "municipality_code", "left_anti").count()
 if orphans:
     raise AssertionError(f"{orphans} fact rows without municipality in the dimension")
-write_table(fact_occurrences, "gold", "fact_occurrences")
+if fact_years:
+    replace_partitions(fact_occurrences, "gold", "fact_occurrences", "year", fact_years)
 
 # fact_state_occurrences (all events)
-fact_state = (state_occurrences
+fact_state = (state_occurrences.filter(F.col("year").isin(fact_years))
               .withColumn("event_id", F.xxhash64("event_name"))
               .withColumn("date_id", F.date_format("reference_date", "yyyyMMdd").cast("int"))
-              .select("state_code", "event_id", "agency", "date_id", "measure_type", "value"))
+              .select("state_code", "event_id", "agency", "date_id", "measure_type", "value", "year"))
 assert_unique(fact_state, ["state_code", "event_id", "agency", "date_id", "measure_type"], "gold.fact_state_occurrences")
-write_table(fact_state, "gold", "fact_state_occurrences")
+if fact_years:
+    replace_partitions(fact_state, "gold", "fact_state_occurrences", "year", fact_years)
 
 # fact_municipality_indicators (snapshot)
 fact_indicators = indicators.drop("state_code")
 assert_unique(fact_indicators, ["municipality_code"], "gold.fact_municipality_indicators")
 write_table(fact_indicators, "gold", "fact_municipality_indicators")
+
+if fact_years:
+    log_change("gold_facts", fact_years)
+log_change("gold_dimensions", ["all"])
+finish_step(CONSUMER)

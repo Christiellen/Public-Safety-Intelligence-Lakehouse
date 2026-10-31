@@ -13,6 +13,8 @@
 # MAGIC SIDRA column codes (`D1C`, `D2N`, `V`...) are renamed with the labels the API itself returns in its header row, converted to snake_case so Delta accepts them.
 # MAGIC
 # MAGIC The Localidades API is optional because some compute environments cannot reach `servicodados.ibge.gov.br`. Without it the pipeline still has every municipality, with code, name, state and region.
+# MAGIC
+# MAGIC **Incremental:** each response is compared with the last load by its SHA-256 hash; an unchanged response is not written again, so the notebooks downstream have nothing to reprocess.
 
 # COMMAND ----------
 
@@ -20,40 +22,41 @@
 
 # COMMAND ----------
 
+import json
+
 ensure_schemas()
 
 # COMMAND ----------
 
 def sidra_get(table: str, variable: str, period: str) -> tuple:
-    """Calls the SIDRA API at municipality level (n6) and returns a Spark DataFrame
-    with columns named after the API header row."""
+    """Calls the SIDRA API at municipality level (n6). Returns the raw response (for the change
+    check) and a function that builds the Spark DataFrame with columns named after the header row."""
     url = f"{SIDRA_BASE}/t/{table}/n6/all/v/{variable}/p/{period}"
-    payload = http_get(url).json()
-    if len(payload) < 2:
-        raise ValueError(f"SIDRA returned no data rows for {url}")
-    header, rows = payload[0], payload[1:]
-    pdf = pd.DataFrame(rows).rename(columns=header)
-    return pandas_to_spark_str(pdf), url
+    content = http_get(url).content
+
+    def build():
+        payload = json.loads(content)
+        if len(payload) < 2:
+            raise ValueError(f"SIDRA returned no data rows for {url}")
+        header, rows = payload[0], payload[1:]
+        return add_audit(pandas_to_spark_str(pd.DataFrame(rows).rename(columns=header)), f"IBGE_SIDRA_{table}", url)
+
+    return content, build
 
 
 # 2. Estimated population: last 5 years, so Silver can pick the latest one and the year closest to the GDP year
-df_population, population_url = sidra_get(SIDRA_POPULATION["table"], SIDRA_POPULATION["variable"], SIDRA_POPULATION["period"])
-df_population = add_audit(df_population, "IBGE_SIDRA_6579", population_url)
-assert_not_empty(df_population, "IBGE population")
-write_table(df_population, "bronze", "bronze_ibge_population")
+write_if_changed("bronze_ibge_population",
+                 *sidra_get(SIDRA_POPULATION["table"], SIDRA_POPULATION["variable"], SIDRA_POPULATION["period"]))
 
 # 3. Municipal GDP: latest published year
-df_gdp, gdp_url = sidra_get(SIDRA_GDP["table"], SIDRA_GDP["variable"], "last%201")
-df_gdp = add_audit(df_gdp, "IBGE_SIDRA_5938", gdp_url)
-assert_not_empty(df_gdp, "IBGE GDP")
-write_table(df_gdp, "bronze", "bronze_ibge_gdp")
+write_if_changed("bronze_ibge_gdp", *sidra_get(SIDRA_GDP["table"], SIDRA_GDP["variable"], "last%201"))
 
 # 4. Optional enrichment: regional hierarchy (IBGE Localidades). Skipped if the host is unreachable.
 try:
-    response = http_get(IBGE_MUNICIPALITIES_URL, retries=1)
-    pdf_municipalities = pd.json_normalize(response.json(), sep=".")
-    df_municipalities = add_audit(pandas_to_spark_str(pdf_municipalities), "IBGE_LOCALIDADES_API", IBGE_MUNICIPALITIES_URL)
-    write_table(df_municipalities, "bronze", "bronze_ibge_municipalities")
+    content = http_get(IBGE_MUNICIPALITIES_URL, retries=1).content
+    write_if_changed("bronze_ibge_municipalities", content, lambda: add_audit(
+        pandas_to_spark_str(pd.json_normalize(json.loads(content), sep=".")),
+        "IBGE_LOCALIDADES_API", IBGE_MUNICIPALITIES_URL))
 except Exception as error:
     print(f"WARNING: IBGE Localidades not loaded ({error}). Regional hierarchy columns will be empty; "
           "code, name, state and region still come from SIDRA.")
