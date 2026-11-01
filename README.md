@@ -240,6 +240,17 @@ Latest evaluation (`gemini-3.6-flash`, October 2026, questions in English):
 
 Median latency 12.7 s per question; about 9,000 input and 2,000 output tokens per question. Ten cases are a regression suite, not a benchmark: LLM outputs vary between runs, so the evaluation is re-run after every model or prompt change and the history is kept in `agent_eval_results`.
 
+## GenAI review of fuzzy matches (entity resolution)
+
+The municipality names in SINESP and SENATRAN are free text. After the exact and alias matches, a conservative fuzzy match (same state, Levenshtein distance up to 2, one best candidate) attaches the remaining names to an IBGE code, and every fuzzy match goes to `psi_silver.qa_fuzzy_matches`, because a near-identical spelling can still be another municipality (*Itapeva* and *Itapevi* are both in São Paulo).
+
+`20_genai_match_review` uses Gemini as the data steward of that list. For each fuzzy match it sends the source name, the matched municipality and the closest IBGE names of the same state, and asks in JSON whether it is the same municipality, another candidate, none of them (a renamed municipality, for example) or uncertain, with a confidence and a reason.
+
+- **The model cannot invent a municipality.** A suggested IBGE code must be one of the candidates sent, and a suggested official name must exist in the IBGE list of that state; anything else becomes `uncertain`.
+- **The model proposes, a person decides.** Each review becomes `confirm`, `fix` or `human review` in `psi_silver.qa_match_review`, and the confirmed and fixed matches are printed as `MUNICIPALITY_ALIASES` entries. The pipeline only changes when someone adds them to notebook 00, which also turns the accepted fuzzy matches into deterministic aliases.
+- **Measured before use.** A labeled set of real look-alike names (renames such as *Presidente Juscelino* to *Serra Caiada*, and different municipalities such as *Itapeva* and *Itapevi*) gives the reviewer's accuracy on each run.
+- **Incremental and cheap.** A match already reviewed with the same prompt version is not sent again; matches go in batches of 20 per model call.
+
 ## How to run
 
 1. Import the `notebooks/` folder into a Databricks workspace (Free Edition works), or clone this repository as a Databricks Git folder. The notebooks are stored in Databricks source format (`.py`) so changes are readable in Git diffs. They must stay in the same folder, because each one loads `00_config_utils` with `%run`.
@@ -271,6 +282,7 @@ Median latency 12.7 s per question; about 9,000 input and 2,000 output tokens pe
 | `17_agents_multiagent` | Agents | Supervisor, SQL and graph analysts, reporter; guardrails; audit log (loaded with `%run`) |
 | `18_agents_demo` | Agents | Example questions with route, queries and answers |
 | `19_agents_evaluation` | Agents | Evaluation cases with ground truth from Gold; routing, correctness and safety scores |
+| `20_genai_match_review` | GenAI | Gemini reviews the fuzzy municipality matches; answers checked in code; proposed aliases for a person to apply |
 
 ## Incremental processing
 
@@ -285,7 +297,7 @@ The pipeline is incremental: each run processes only what changed since the prev
 
 ## Orchestration (Databricks Asset Bundle)
 
-The pipeline is defined as code in `databricks.yml` and `resources/psi_pipeline.job.yml`: one Databricks Job with a task per notebook (01-16), dependencies that follow the data (the five Bronze loads run in parallel; Silver, Gold, spatial analytics, the Neo4j load, the map and the data dictionary follow), retries on the tasks that call public APIs, a weekly schedule (Mondays 06:00, São Paulo time) and the job parameter `full_refresh`. Because the notebooks are incremental, a task with nothing new ends at its start and the job moves on. The AI assistant (17-19) is not scheduled: it runs on demand and uses a paid LLM API.
+The pipeline is defined as code in `databricks.yml` and `resources/psi_pipeline.job.yml`: one Databricks Job with a task per notebook (01-16), dependencies that follow the data (the five Bronze loads run in parallel; Silver, Gold, spatial analytics, the Neo4j load, the map and the data dictionary follow), retries on the tasks that call public APIs, a weekly schedule (Mondays 06:00, São Paulo time) and the job parameter `full_refresh`. Because the notebooks are incremental, a task with nothing new ends at its start and the job moves on. The AI notebooks (17-20) are not scheduled: they run on demand and use a paid LLM API.
 
 A run of the job right after a full load: every task succeeded, and the ones with nothing new ended at their start.
 
@@ -327,6 +339,7 @@ How it works: `tests/notebook_loader.py` executes the Databricks source files ce
 | `test_n8n_workflow` | n8n workflow: every node connected and reachable from a trigger, settings from the environment, no tokens or e-mails in the JSON, and `briefing.sql` run on the Gold tables |
 | `test_data_dictionary` | Notebook 16: dictionary and UC comments; the quality gate fails on undocumented or removed columns; the published dictionary (`docs/data_dictionary`) matches the table |
 | `test_guards` | Notebook 17: SQL and Cypher queries that must pass and that must be blocked (writes, other schemas, other projects' nodes, table functions, multiple statements) |
+| `test_match_review` | Notebook 20 with a fake LLM: every fuzzy match reviewed once, re-runs send nothing, invented codes and unknown official names rejected, malformed answers become `uncertain`, actions and the labeled evaluation |
 | `test_agents` | Notebook 17-19 with a fake LLM and a fake Neo4j driver: routing, parallel specialists, self-correction, answer language, model fallback, read transaction with timeout, audit log, and the evaluation notebook end to end |
 | `test_incremental` | Change log and skipped runs: a re-run without new data does nothing; a revised 2026 file reprocesses only the 2026 partitions (2025 untouched) and updates the analytics; a new fleet month is added and used while older months are kept; `FULL_REFRESH` reprocesses every year |
 | `test_job_definition` | The Databricks job: notebooks 01-16 scheduled once, no cycles, and every table read and change-log input produced by an upstream task |
