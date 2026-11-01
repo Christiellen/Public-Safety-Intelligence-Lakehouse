@@ -303,7 +303,14 @@ if spark.catalog.tableExists(review_target):
     proposals = (latest.filter(F.col("action").isin("confirm", "fix"))
                  .select("action", "state_code", "source_name", "suggested_key", "suggested_name")
                  .distinct().orderBy("action", "state_code", "source_name").collect())
-    print(f"Proposed MUNICIPALITY_ALIASES entries ({len(proposals)}), to review and paste in notebook 00:")
+    # One entry per (state, name key): names that differ only in accents share the same key;
+    # entries already in MUNICIPALITY_ALIASES are not proposed again.
+    entries = {}
     for p in proposals:
-        print(f'    ("{p.state_code}", "{plain_key(p.source_name)}"): "{p.suggested_key}",'
+        key = (p.state_code, plain_key(p.source_name))
+        if key not in MUNICIPALITY_ALIASES and key not in entries:
+            entries[key] = p
+    print(f"Proposed MUNICIPALITY_ALIASES entries ({len(entries)}), to review and paste in notebook 00:")
+    for (state, source_key), p in entries.items():
+        print(f'    ("{state}", "{source_key}"): "{p.suggested_key}",'
               f'   # {p.action}: {p.source_name} -> {p.suggested_name}')

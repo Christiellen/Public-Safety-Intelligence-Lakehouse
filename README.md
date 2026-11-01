@@ -251,6 +251,8 @@ The municipality names in SINESP and SENATRAN are free text. After the exact and
 - **Measured before use.** A labeled set of real look-alike names (renames such as *Presidente Juscelino* to *Serra Caiada*, and different municipalities such as *Itapeva* and *Itapevi*) gives the reviewer's accuracy on each run.
 - **Incremental and cheap.** A match already reviewed with the same prompt version is not sent again; matches go in batches of 20 per model call.
 
+First run (`gemini-3.6-flash`, October 2026): 11/11 on the labeled set; the 34 fuzzy matches of SINESP and SENATRAN were all confirmed with high confidence (spelling variants such as *Parati*/*Paraty* and *Arês*/*Arez*, preposition swaps and names truncated at 30 characters), so the fuzzy rule had no false positives. After a manual check, the 28 distinct names were added to `MUNICIPALITY_ALIASES`, and they are now matched exactly.
+
 ## How to run
 
 1. Import the `notebooks/` folder into a Databricks workspace (Free Edition works), or clone this repository as a Databricks Git folder. The notebooks are stored in Databricks source format (`.py`) so changes are readable in Git diffs. They must stay in the same folder, because each one loads `00_config_utils` with `%run`.
