@@ -28,7 +28,9 @@ Open <http://localhost:8088> and sign in with `SUPERSET_ADMIN_USER` / `SUPERSET_
 ```bash
 sudo apt-get install -y socat
 socat TCP-LISTEN:8089,fork,reuseaddr TCP:127.0.0.1:8088
-``` The service `superset-init` prepares everything before the web server starts, and can run again on every `up`: each step skips what is already done.
+```
+
+The service `superset-init` prepares everything before the web server starts, and can run again on every `up`: each step skips what is already done.
 
 | Step | What it does |
 |---|---|
@@ -36,6 +38,8 @@ socat TCP-LISTEN:8089,fork,reuseaddr TCP:127.0.0.1:8088
 | Load | `loader/load_gold.py`: checks every file of `data/` against `manifest.json` (SHA-256, header, row count), recreates `psi_gold` with the column types of the manifest, loads with `COPY`, checks the primary keys and rebuilds the views of `psi_bi`, all in one transaction. A manifest already loaded is skipped |
 | Datasets | `assets/build_assets.py` turns `assets/datasets.yml` into an import bundle (database connection + 6 datasets with column descriptions and metrics), imported with `superset import-datasources` |
 | Dashboards | Every `dashboards/*.zip` is imported with `superset import-dashboards` |
+
+**After changing a dashboard ZIP:** `docker compose up -d superset-init` imports it again, but the running web server keeps the previous dashboard and chart definitions in its in-memory cache for up to 5 minutes. Run `docker compose restart superset` (and start `socat` again, on WSL) or wait, then reload the page with Ctrl+F5.
 
 ## Semantic layer (`psi_bi`)
 
