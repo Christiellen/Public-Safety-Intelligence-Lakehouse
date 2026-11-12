@@ -81,7 +81,7 @@ The views keep the rules of the Gold layer: CVLI is the `victims` measure of the
 | Filter bar (horizontal) | State, Period (default Jan-Sep 2026) and Municipality, cascading from State; *Clear All* | `cvli_monthly_municipality` |
 | KPIs | Big numbers: total CVLI, annualized rate, year-over-year change (selected months vs the same months of the previous year) | `cvli_monthly_municipality` |
 | Left card, in tabs | *States*: top 5 states by rate. *Municipalities*: top 5 municipalities with 20,000+ inhabitants. *Profile*: the selected municipality | `cvli_monthly_municipality`, `municipality_profile_items` |
-| Rate trend | Monthly annualized rate (teal) and the rate of the whole selection (amber reference line) | `cvli_monthly_municipality` |
+| Rate trend | Monthly annualized rate (teal) and the rate of the whole selection (amber reference line), one label per month (`year_month`) | `cvli_monthly_municipality` |
 | Table | Top 4 municipalities with 20,000+ inhabitants by rate, LISA cluster highlighted; a click filters the dashboard (cross-filter) | `cvli_monthly_municipality` |
 | High-violence clusters | Big number of High-High municipalities; follows the State filter, not the Period (fixed 12-month window) | `municipality_profile` |
 
