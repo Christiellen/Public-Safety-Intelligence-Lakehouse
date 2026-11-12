@@ -4,7 +4,7 @@
 #   1. Superset metadata database and admin user
 #   2. Gold export (superset/data) -> PostgreSQL psi_gold, views psi_bi   (skipped when unchanged)
 #   3. database connection and datasets, from superset/assets/datasets.yml
-#   4. dashboards exported to superset/dashboards/*.zip, if any
+#   4. dashboards exported to superset/dashboards/*.zip, if any (charts replaced, see import_dashboards.py)
 set -euo pipefail
 
 REPO="${PSI_REPO:-/repo}"
@@ -28,10 +28,11 @@ superset import-datasources -p /tmp/psi_datasets.zip -u "${ADMIN_USER}"
 echo "== 4/4 Dashboards"
 shopt -s nullglob
 dashboards=("${REPO}"/superset/dashboards/*.zip)
-for dashboard in "${dashboards[@]}"; do
-    echo "Importing ${dashboard##*/}"
-    superset import-dashboards -p "${dashboard}" -u "${ADMIN_USER}"
-done
-[ ${#dashboards[@]} -gt 0 ] || echo "No dashboard in superset/dashboards yet."
+if [ ${#dashboards[@]} -gt 0 ]; then
+    # replaces charts that already exist too (superset import-dashboards keeps them unchanged)
+    SUPERSET_ADMIN_USER="${ADMIN_USER}" python "${REPO}/superset/docker/import_dashboards.py" "${dashboards[@]}"
+else
+    echo "No dashboard in superset/dashboards yet."
+fi
 
 echo "Ready: http://localhost:${SUPERSET_PORT:-8088} (user ${ADMIN_USER})"

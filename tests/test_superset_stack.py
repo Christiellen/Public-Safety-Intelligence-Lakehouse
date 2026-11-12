@@ -412,6 +412,29 @@ def test_dashboard_exports_match_the_datasets():
         assert {c["dataset_uuid"] for c in charts} <= {d["uuid"] for d in datasets}
 
 
+def test_dashboard_import_replaces_existing_charts():
+    """superset/docker/import_dashboards.py builds a chart bundle from each dashboard export, so
+    charts that already exist are replaced on every superset-init run."""
+    import importlib.util
+    import zipfile
+
+    import yaml
+
+    path = ROOT / "superset" / "docker" / "import_dashboards.py"
+    spec = importlib.util.spec_from_file_location("import_dashboards", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    for export in sorted((ROOT / "superset" / "dashboards").glob("*.zip")):
+        with zipfile.ZipFile(export) as bundle:
+            contents = {n.split("/", 1)[1]: bundle.read(n).decode() for n in bundle.namelist()}
+        charts = module.chart_bundle(contents)
+        assert yaml.safe_load(charts["metadata.yaml"])["type"] == "Slice"
+        assert yaml.safe_load(contents["metadata.yaml"])["type"] == "Dashboard"   # input untouched
+        assert not any(p.startswith("dashboards/") for p in charts)
+        assert {p for p in contents if p.startswith("charts/")} == {p for p in charts if p.startswith("charts/")}
+    assert "import_dashboards.py" in (ROOT / "superset" / "docker" / "init.sh").read_text()
+
+
 @needs_postgres
 def test_published_bi_dictionary_is_up_to_date(loaded):
     """docs/data_dictionary/bi (Markdown, Excel, CSV) must match the datasets Superset receives.

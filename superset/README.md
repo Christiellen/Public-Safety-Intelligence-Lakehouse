@@ -37,7 +37,7 @@ The service `superset-init` prepares everything before the web server starts, an
 | Metadata | Superset database migrations, admin user, roles |
 | Load | `loader/load_gold.py`: checks every file of `data/` against `manifest.json` (SHA-256, header, row count), recreates `psi_gold` with the column types of the manifest, loads with `COPY`, checks the primary keys and rebuilds the views of `psi_bi`, all in one transaction. A manifest already loaded is skipped |
 | Datasets | `assets/build_assets.py` turns `assets/datasets.yml` into an import bundle (database connection + 6 datasets with column descriptions and metrics), imported with `superset import-datasources` |
-| Dashboards | Every `dashboards/*.zip` is imported with `superset import-dashboards` |
+| Dashboards | `docker/import_dashboards.py` imports every `dashboards/*.zip`: first its charts, replacing the ones that already exist, then the dashboard. `superset import-dashboards` alone never replaces an existing chart, so a change to a chart in the ZIP would not reach a stack created before it |
 
 **After changing a dashboard ZIP:** `docker compose up -d superset-init` imports it again, but the running web server keeps the previous dashboard and chart definitions in its in-memory cache for up to 5 minutes. Run `docker compose restart superset` (and start `socat` again, on WSL) or wait, then reload the page with Ctrl+F5.
 
@@ -117,7 +117,7 @@ The database and the datasets have fixed UUIDs (derived from their names in `bui
 - the loader: a changed file is rejected, row counts and types survive the CSV, a second load is skipped;
 - the views against the Gold tables: monthly CVLI summed over the window equals `state_analytics`, and the national rate is the same;
 - the main dataset: summed by state it equals the state facts, by municipality the municipal facts, every area has every month, the state population adds up, the year-over-year metric matches the hand calculation (and is null without the previous year), and the profile shows only one municipality;
-- the dashboard exports: database and datasets referenced by the stable UUIDs, Docker host, no password;
+- the dashboard exports: database and datasets referenced by the stable UUIDs, Docker host, no password; the import replaces charts that already exist;
 - the read-only role reads `psi_bi` and is refused on `psi_gold` and on writes;
 - the BI data dictionary in `docs/data_dictionary/bi` matches the datasets;
 - the datasets: every view is a dataset, every column is documented, UUIDs are stable, and every metric of `datasets.yml` runs as SQL with the read-only role, also grouped by month.
