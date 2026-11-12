@@ -1,0 +1,59 @@
+# Superset over the Gold layer, loaded into PostgreSQL.
+#
+#   cp .env.example .env     # then set the passwords and the secret key
+#   docker compose up --build
+#
+# Open http://localhost:8088. See README.md for the data refresh.
+name: psi-superset
+
+x-superset: &superset
+  build:
+    context: docker
+  image: psi-superset:6.1.0
+  env_file: .env
+  environment:
+    SUPERSET_CONFIG_PATH: /repo/superset/docker/superset_config.py
+    POSTGRES_HOST: db
+    PSI_DB_DSN: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD}@db:5432/psi
+    PSI_READER_DSN: postgresql://${PSI_READER_USER:-psi_reader}:${PSI_READER_PASSWORD}@db:5432/psi
+  volumes:
+    - ..:/repo:ro            # notebooks are not used; the stack reads superset/ and docs/data_dictionary
+
+services:
+  db:
+    image: postgres:16-alpine
+    env_file: .env
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./docker/postgres-init.sql:/docker-entrypoint-initdb.d/01-databases.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d psi"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  superset-init:
+    <<: *superset
+    command: ["bash", "/repo/superset/docker/init.sh"]
+    depends_on:
+      db:
+        condition: service_healthy
+
+  superset:
+    <<: *superset
+    ports:
+      - "${SUPERSET_PORT:-8088}:8088"
+    depends_on:
+      superset-init:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8088/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+volumes:
+  postgres_data:

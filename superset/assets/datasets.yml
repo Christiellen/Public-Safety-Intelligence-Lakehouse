@@ -1,0 +1,252 @@
+# Superset datasets as code: one entry per view of the schema psi_bi (superset/sql/views.sql).
+#
+# build_assets.py reads the real columns of each view from PostgreSQL and turns this file into a
+# Superset import bundle (database + datasets, with fixed UUIDs, so a dashboard exported from one
+# environment imports into another). Column descriptions come from the data dictionary of the Gold
+# layer (docs/data_dictionary/data_dictionary.csv) through `sources`; a column that is neither there
+# nor in `columns` below stops the build, as the quality gate of notebook 16 does.
+#
+# Metrics are ratios of sums, never averages of rates: a rate averaged over municipalities gives a
+# village of 2,000 inhabitants the same weight as a capital.
+
+database:
+  name: PSI Lakehouse
+
+datasets:
+  municipality_profile:
+    description: One row per municipality - indicators, CVLI rate, hotspots, IVSC and LISA cluster in the analysis window.
+    sources: [municipality_analytics, municipality_spatial_metrics, state_analytics]
+    main_dttm_col: null
+    columns:
+      municipality_label:
+        verbose_name: Municipality
+        description: Municipality name and state code, e.g. Bom Jesus (PI). Names repeat across states.
+      population_year_label:
+        description: Reference year of the population, as text.
+      lisa_p_value:
+        verbose_name: LISA p-value
+      lisa_cluster:
+        description: "LISA cluster at 5% (High-High, Low-Low, High-Low, Low-High, Not significant, No neighbors), or No data when the municipality has no spatial metrics."
+    metrics:
+      municipalities:
+        verbose_name: Municipalities
+        expression: COUNT(*)
+        d3format: ",d"
+      population:
+        verbose_name: Population
+        expression: SUM(population)
+        d3format: ",d"
+      cvli_victims:
+        verbose_name: CVLI victims
+        expression: SUM(cvli_victims)
+        d3format: ",d"
+      cvli_rate_100k:
+        verbose_name: CVLI rate per 100k
+        expression: SUM(cvli_victims) * 12.0 / MAX(months_covered) * 100000 / NULLIF(SUM(CASE WHEN has_sinesp_records THEN population END), 0)
+        d3format: ",.1f"
+        description: Annualized CVLI victims per 100,000 inhabitants of the selected municipalities with SINESP records. Victims without informed municipality are not included (see state_profile).
+      national_hotspots:
+        verbose_name: National hotspots
+        expression: SUM(CASE WHEN is_national_hotspot THEN 1 ELSE 0 END)
+        d3format: ",d"
+      state_hotspots:
+        verbose_name: State hotspots
+        expression: SUM(CASE WHEN is_state_hotspot THEN 1 ELSE 0 END)
+        d3format: ",d"
+      high_high_municipalities:
+        verbose_name: High-High municipalities
+        expression: SUM(CASE WHEN lisa_cluster = 'High-High' THEN 1 ELSE 0 END)
+        d3format: ",d"
+      avg_ivsc_score:
+        verbose_name: Average IVSC
+        expression: AVG(ivsc_score)
+        d3format: ".3f"
+        description: Simple average of the Social & Criminal Vulnerability Index (0 to 1) of the selected municipalities.
+
+  municipality_profile_items:
+    description: Profile of each municipality as label and value rows (population, IVSC, Z-score, hotspot, LISA cluster, IDHM), for the profile table of the dashboard.
+    sources: [municipality_analytics]
+    main_dttm_col: null
+    columns:
+      municipality_label:
+        verbose_name: Municipality
+        description: Municipality name and state code, e.g. Porto Velho (RO).
+      state_name:
+        description: State name.
+      item_order:
+        description: Display order of the item.
+      item:
+        verbose_name: Indicator
+        description: Name of the indicator, with its reference period.
+      value:
+        verbose_name: Value
+        description: Value of the indicator, formatted as text.
+    metrics:
+      value:
+        verbose_name: Value
+        expression: MAX(value)
+      municipalities:
+        verbose_name: Municipalities
+        expression: COUNT(DISTINCT municipality_code)
+
+  state_profile:
+    description: One row per state - lethal violence, vehicle crimes and drug seizures in the analysis window.
+    sources: [state_analytics]
+    main_dttm_col: null
+    metrics:
+      population:
+        verbose_name: Population
+        expression: SUM(population)
+        d3format: ",d"
+      cvli_victims:
+        verbose_name: CVLI victims
+        expression: SUM(cvli_victims)
+        d3format: ",d"
+      cvli_rate_100k:
+        verbose_name: CVLI rate per 100k
+        expression: SUM(cvli_victims) * 12.0 / MAX(months_covered) * 100000 / NULLIF(SUM(population), 0)
+        d3format: ",.1f"
+        description: Annualized CVLI victims per 100,000 inhabitants of the selected states, including victims without informed municipality.
+      vehicle_crime_rate_1k_fleet:
+        verbose_name: Vehicle crimes per 1k vehicles
+        expression: SUM(vehicle_crimes) * 12.0 / MAX(months_covered) * 1000 / NULLIF(SUM(fleet_total), 0)
+        d3format: ",.2f"
+      drug_seizure_kg:
+        verbose_name: Drug seizures (kg)
+        expression: SUM(drug_seizure_kg)
+        d3format: ",.0f"
+
+  cvli_monthly_state:
+    description: One row per state and month - CVLI victims, including victims without informed municipality.
+    sources: [state_analytics, dim_date, dim_state]
+    main_dttm_col: month
+    columns:
+      month:
+        verbose_name: Month
+        description: First day of the reference month.
+      cvli_victims:
+        description: CVLI victims in the month (intentional homicide, feminicide, robbery followed by death and bodily injury followed by death), all reporting agencies.
+      population:
+        description: Latest population estimate of the state (IBGE), the same in every month.
+      cvli_rate_100k_annualized:
+        verbose_name: CVLI rate per 100k (annualized, month)
+        description: CVLI victims of the month x 12 per 100,000 inhabitants.
+    metrics:
+      cvli_victims:
+        verbose_name: CVLI victims
+        expression: SUM(cvli_victims)
+        d3format: ",d"
+      cvli_rate_100k_annualized:
+        verbose_name: CVLI rate per 100k (annualized)
+        expression: SUM(cvli_victims) * 12 * 100000.0 / NULLIF(SUM(population), 0)
+        d3format: ",.1f"
+        description: Annualized CVLI rate of the selected states. Valid per month and over several months, because every row carries its state population.
+
+  cvli_monthly_municipality:
+    description: Main dataset of the dashboard - one row per area and month on a complete grid. Areas are the municipalities with SINESP records plus one Not assigned row per state, so sums by state equal the state facts.
+    sources: [municipality_analytics, state_analytics, dim_date]
+    main_dttm_col: month
+    columns:
+      municipality_code:
+        description: IBGE 7-digit municipality code. Null on the Not assigned rows.
+      municipality_name:
+        description: Official municipality name (IBGE), or Not assigned for the victims of the state without informed municipality.
+      municipality_label:
+        verbose_name: Municipality
+        description: Municipality name and state code, e.g. Porto Velho (RO), or Not assigned (RO). Names repeat across states.
+      state_code:
+        verbose_name: State
+      state_name:
+        verbose_name: State name
+      is_municipality:
+        verbose_name: Is municipality
+        description: False on the Not assigned rows. Filter on it for rankings and tables of municipalities.
+      month:
+        verbose_name: Month
+        description: First day of the reference month.
+      month_of_year:
+        verbose_name: Month of year
+        description: Month number (1-12), to compare the same months of different years.
+      cvli_victims:
+        description: CVLI victims in the month (intentional homicide, feminicide, robbery followed by death and bodily injury followed by death), all reporting agencies. Zero when the municipality has no record in the month.
+      cvli_victims_previous_year:
+        verbose_name: CVLI victims (same month, previous year)
+        description: CVLI victims of the same area in the same month of the previous year. Null when that month is not in the data.
+      population:
+        description: Latest population estimate (IBGE), repeated every month. On the Not assigned row, the population of the state's municipalities without records.
+      lisa_cluster:
+        verbose_name: LISA cluster
+        description: LISA cluster of the municipality (fixed 12-month window of the spatial analysis, not the selected period). Null on the Not assigned rows.
+    metrics:
+      cvli_victims:
+        verbose_name: CVLI victims
+        expression: SUM(cvli_victims)
+        d3format: ",d"
+      cvli_rate_100k_annualized:
+        verbose_name: CVLI rate per 100k (annualized)
+        expression: SUM(cvli_victims) * 12 * 100000.0 / NULLIF(SUM(population), 0)
+        d3format: ",.2f"
+        description: Annualized CVLI victims per 100,000 inhabitants of the selected areas and months. Valid for any filter, because every row carries the population of its area.
+      cvli_yoy_change:
+        verbose_name: Year-over-year change in CVLI
+        expression: CASE WHEN COUNT(cvli_victims_previous_year) = COUNT(*) THEN SUM(cvli_victims) / NULLIF(SUM(cvli_victims_previous_year), 0) - 1 END
+        d3format: "+.2%"
+        description: CVLI victims of the selected months against the same months of the previous year. Null when any of those previous months is missing from the data.
+      cvli_victims_previous_year:
+        verbose_name: CVLI victims (previous year)
+        expression: SUM(cvli_victims_previous_year)
+        d3format: ",d"
+      period_rate_reference:
+        verbose_name: Period rate
+        expression: SUM(SUM(cvli_victims)) OVER () * 12 * 100000.0 / NULLIF(SUM(SUM(population)) OVER (), 0)
+        d3format: ",.2f"
+        description: Annualized CVLI rate of the whole selection, the same value on every row of the chart. Reference line of the rate trend.
+      municipalities:
+        verbose_name: Municipalities
+        expression: COUNT(DISTINCT municipality_code)
+        d3format: ",d"
+
+  cvli_kpis:
+    description: One row - national KPIs of the analysis window and the change against the previous window of the same length.
+    sources: [state_analytics]
+    main_dttm_col: null
+    columns:
+      cvli_victims:
+        description: CVLI victims in Brazil in the analysis window, including victims without informed municipality.
+      population:
+        description: Population of Brazil (sum of the states).
+      cvli_rate_100k:
+        description: Annualized CVLI victims per 100,000 inhabitants in Brazil.
+      previous_cvli_victims:
+        verbose_name: CVLI victims (previous window)
+        description: CVLI victims in the window of the same length right before the analysis window.
+      previous_months_covered:
+        description: Months with data in the previous window.
+      cvli_change_pct:
+        verbose_name: CVLI change (%)
+        description: Change of CVLI victims against the previous window, in percent. Null when the previous window is not complete.
+      national_hotspots:
+        description: Number of municipalities flagged as national hotspots (Z-Score >= 2).
+      high_high_municipalities:
+        description: Number of municipalities in a High-High LISA cluster (regional violence clusters).
+    metrics:
+      cvli_rate_100k:
+        verbose_name: CVLI rate per 100k
+        expression: MAX(cvli_rate_100k)
+        d3format: ",.1f"
+      cvli_victims:
+        verbose_name: CVLI victims
+        expression: MAX(cvli_victims)
+        d3format: ",d"
+      cvli_change_pct:
+        verbose_name: CVLI change (%)
+        expression: MAX(cvli_change_pct) / 100.0
+        d3format: "+.1%"
+      national_hotspots:
+        verbose_name: National hotspots
+        expression: MAX(national_hotspots)
+        d3format: ",d"
+      high_high_municipalities:
+        verbose_name: High-High municipalities
+        expression: MAX(high_high_municipalities)
+        d3format: ",d"

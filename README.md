@@ -45,6 +45,12 @@ graph LR
         N4J["Neo4j AuraDB<br/>Municipality - State - Community<br/>BORDERS - IN_STATE - IN_COMMUNITY"]
     end
 
+    subgraph BI["BI - Superset stack (docker compose)"]
+        EXP["21_gold_export_bi<br/>CSV + manifest"]
+        PG["PostgreSQL<br/>psi_gold tables - psi_bi views"]
+        SUPS["Superset 6.1<br/>datasets + dashboard"]
+    end
+
     subgraph Agents["AI assistant - LangGraph + Gemini"]
         SUP["supervisor"]
         SQLA["sql_analyst"]
@@ -79,6 +85,9 @@ graph LR
     A --> DD
     SA --> DD
     SP --> DD
+    Gold --> EXP
+    EXP -.hash + row checks.-> PG
+    PG -.read-only role.-> SUPS
     SUP --> SQLA
     SUP --> GRA
     DD -.allowlist + schema.-> SQLA
@@ -120,7 +129,7 @@ All data is real and public. Each indicator carries the year it refers to (`popu
 | `graph_communities` | Analytical table | One row per Louvain community |
 | `municipality_borders` | Edge list | One row per pair of neighboring municipalities, with border length in km |
 
-**Data dictionary.** Every column of the tables that the analytics and the AI agents use is described in [`docs/data_dictionary`](docs/data_dictionary/README.md), with its data type, and can be downloaded as [Excel](docs/data_dictionary/data_dictionary.xlsx) or [CSV](docs/data_dictionary/data_dictionary.csv). The files are generated from `psi_gold.data_dictionary` (notebook 16), and a test fails when they are out of date.
+**Data dictionary.** Every column of the tables that the analytics and the AI agents use is described in [`docs/data_dictionary`](docs/data_dictionary/README.md), with its data type, and can be downloaded as [Excel](docs/data_dictionary/data_dictionary.xlsx) or [CSV](docs/data_dictionary/data_dictionary.csv). The files are generated from `psi_gold.data_dictionary` (notebook 16), and a test fails when they are out of date. The views that Superset reads have their own dictionary, with labels and metric formulas, in [`docs/data_dictionary/bi`](docs/data_dictionary/bi/README.md).
 
 ## Data quality rules
 
@@ -285,6 +294,7 @@ First run (`gemini-3.6-flash`, October 2026): 11/11 on the labeled set; the 34 f
 | `18_agents_demo` | Agents | Example questions with route, queries and answers |
 | `19_agents_evaluation` | Agents | Evaluation cases with ground truth from Gold; routing, correctness and safety scores |
 | `20_genai_match_review` | GenAI | Gemini reviews the fuzzy municipality matches; answers checked in code; proposed aliases for a person to apply |
+| `21_gold_export_bi` | Gold | Gold tables as compressed CSV + manifest (rows, types, SHA-256) for the Superset stack; on demand |
 
 ## Incremental processing
 
@@ -323,13 +333,22 @@ A weekly run against the real workspace: the job had succeeded, so the briefing 
 
 ![n8n workflow run](docs/n8n_workflow.png)
 
+## BI dashboard (Superset)
+
+[`superset/`](superset/README.md) runs Apache Superset over the Gold layer with one command and no Databricks workspace: `21_gold_export_bi` exports the Gold tables as files with a manifest, and `docker compose up` loads them into PostgreSQL, checks every file against the manifest (hash, header, rows, primary keys), builds a semantic layer of views (`psi_bi`) and registers the datasets in Superset.
+
+- **Read-only by design.** Superset connects with a role that reads the `psi_bi` views and nothing else: no access to the Gold tables, no writes.
+- **One definition per metric.** Rates are ratios of sums (victims over population), defined once in [`superset/assets/datasets.yml`](superset/assets/datasets.yml), so every chart computes the CVLI rate the same way as the Gold layer.
+- **Documented and versioned.** Dataset columns take their descriptions from the data dictionary (an undocumented column stops the build), the BI layer is published as its own [data dictionary](docs/data_dictionary/bi/README.md), and dashboards are versioned as Superset exports in `superset/dashboards`, imported on every start.
+- **Designed first.** The dashboard follows a Figma prototype (overview, state and municipality views) and is built from native charts: KPIs with year-over-year change, rankings in tabs, rate trend with a reference line, a cross-filtering table and the LISA clusters.
+
 ## Tests and CI
 
 Every push and pull request runs these jobs on GitHub Actions (`.github/workflows/ci.yml`):
 
 - **Lint:** `ruff check` on the notebooks and the tests.
 - **Bundle:** `databricks bundle validate`, when the Databricks secrets are configured.
-- **Tests:** `pytest` runs the **real notebooks** on a local Spark 4 session (Python 3.12, as on Databricks serverless), with no Databricks workspace, Neo4j or Gemini key.
+- **Tests:** `pytest` runs the **real notebooks** on a local Spark 4 session (Python 3.12, as on Databricks serverless), with no Databricks workspace, Neo4j or Gemini key. A PostgreSQL service container is used by the Superset stack tests.
 
 How it works: `tests/notebook_loader.py` executes the Databricks source files cell by cell, the way `%run` does, with two local overrides (no Unity Catalog, Parquet instead of Delta), and honours `dbutils.notebook.exit`. `tests/fake_sources.py` serves the SINESP and SENATRAN spreadsheets in memory (`FakeWeb`), so the Bronze notebooks 02 and 03 run for real, and writes the other small Bronze tables that reproduce the layout and the known problems of each source: homonym municipalities in different states, an old spelling solved by an alias, a typo solved by fuzzy matching, thousands separators, events published per state only, a Federal Police row with every value null, a 6-digit IBGE code, and a 3x3 grid mesh with corner-only contacts and an ocean island.
 
@@ -346,6 +365,7 @@ How it works: `tests/notebook_loader.py` executes the Databricks source files ce
 | `test_incremental` | Change log and skipped runs: a re-run without new data does nothing; a revised 2026 file reprocesses only the 2026 partitions (2025 untouched) and updates the analytics; a new fleet month is added and used while older months are kept; `FULL_REFRESH` reprocesses every year |
 | `test_job_definition` | The Databricks job: notebooks 01-16 scheduled once, no cycles, and every table read and change-log input produced by an upstream task |
 | `test_evaluation_helpers` | Notebook 19: numbers in Brazilian and English formats, names with or without accents |
+| `test_superset_stack` | Notebook 21 and the Superset stack, on a PostgreSQL service container: export complete and sorted, nulls kept, changed files rejected, views equal to the Gold totals, read-only role refused on Gold and on writes, every dataset column documented and every metric valid SQL |
 
 Run locally (Java 17+ and Python 3.12):
 

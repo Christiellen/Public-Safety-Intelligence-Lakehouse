@@ -1,0 +1,29 @@
+dataset,metric_name,label,format,expression,description
+municipality_profile,municipalities,Municipalities,",d",COUNT(*),
+municipality_profile,population,Population,",d",SUM(population),
+municipality_profile,cvli_victims,CVLI victims,",d",SUM(cvli_victims),
+municipality_profile,cvli_rate_100k,CVLI rate per 100k,",.1f","SUM(cvli_victims) * 12.0 / MAX(months_covered) * 100000 / NULLIF(SUM(CASE WHEN has_sinesp_records THEN population END), 0)","Annualized CVLI victims per 100,000 inhabitants of the selected municipalities with SINESP records. Victims without informed municipality are not included (see state_profile)."
+municipality_profile,national_hotspots,National hotspots,",d",SUM(CASE WHEN is_national_hotspot THEN 1 ELSE 0 END),
+municipality_profile,state_hotspots,State hotspots,",d",SUM(CASE WHEN is_state_hotspot THEN 1 ELSE 0 END),
+municipality_profile,high_high_municipalities,High-High municipalities,",d",SUM(CASE WHEN lisa_cluster = 'High-High' THEN 1 ELSE 0 END),
+municipality_profile,avg_ivsc_score,Average IVSC,.3f,AVG(ivsc_score),Simple average of the Social & Criminal Vulnerability Index (0 to 1) of the selected municipalities.
+municipality_profile_items,value,Value,,MAX(value),
+municipality_profile_items,municipalities,Municipalities,,COUNT(DISTINCT municipality_code),
+state_profile,population,Population,",d",SUM(population),
+state_profile,cvli_victims,CVLI victims,",d",SUM(cvli_victims),
+state_profile,cvli_rate_100k,CVLI rate per 100k,",.1f","SUM(cvli_victims) * 12.0 / MAX(months_covered) * 100000 / NULLIF(SUM(population), 0)","Annualized CVLI victims per 100,000 inhabitants of the selected states, including victims without informed municipality."
+state_profile,vehicle_crime_rate_1k_fleet,Vehicle crimes per 1k vehicles,",.2f","SUM(vehicle_crimes) * 12.0 / MAX(months_covered) * 1000 / NULLIF(SUM(fleet_total), 0)",
+state_profile,drug_seizure_kg,Drug seizures (kg),",.0f",SUM(drug_seizure_kg),
+cvli_monthly_state,cvli_victims,CVLI victims,",d",SUM(cvli_victims),
+cvli_monthly_state,cvli_rate_100k_annualized,CVLI rate per 100k (annualized),",.1f","SUM(cvli_victims) * 12 * 100000.0 / NULLIF(SUM(population), 0)","Annualized CVLI rate of the selected states. Valid per month and over several months, because every row carries its state population."
+cvli_monthly_municipality,cvli_victims,CVLI victims,",d",SUM(cvli_victims),
+cvli_monthly_municipality,cvli_rate_100k_annualized,CVLI rate per 100k (annualized),",.2f","SUM(cvli_victims) * 12 * 100000.0 / NULLIF(SUM(population), 0)","Annualized CVLI victims per 100,000 inhabitants of the selected areas and months. Valid for any filter, because every row carries the population of its area."
+cvli_monthly_municipality,cvli_yoy_change,Year-over-year change in CVLI,+.2%,"CASE WHEN COUNT(cvli_victims_previous_year) = COUNT(*) THEN SUM(cvli_victims) / NULLIF(SUM(cvli_victims_previous_year), 0) - 1 END",CVLI victims of the selected months against the same months of the previous year. Null when any of those previous months is missing from the data.
+cvli_monthly_municipality,cvli_victims_previous_year,CVLI victims (previous year),",d",SUM(cvli_victims_previous_year),
+cvli_monthly_municipality,period_rate_reference,Period rate,",.2f","SUM(SUM(cvli_victims)) OVER () * 12 * 100000.0 / NULLIF(SUM(SUM(population)) OVER (), 0)","Annualized CVLI rate of the whole selection, the same value on every row of the chart. Reference line of the rate trend."
+cvli_monthly_municipality,municipalities,Municipalities,",d",COUNT(DISTINCT municipality_code),
+cvli_kpis,cvli_rate_100k,CVLI rate per 100k,",.1f",MAX(cvli_rate_100k),
+cvli_kpis,cvli_victims,CVLI victims,",d",MAX(cvli_victims),
+cvli_kpis,cvli_change_pct,CVLI change (%),+.1%,MAX(cvli_change_pct) / 100.0,
+cvli_kpis,national_hotspots,National hotspots,",d",MAX(national_hotspots),
+cvli_kpis,high_high_municipalities,High-High municipalities,",d",MAX(high_high_municipalities),
