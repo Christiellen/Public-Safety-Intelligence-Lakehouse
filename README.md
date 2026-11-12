@@ -342,6 +342,10 @@ A weekly run against the real workspace: the job had succeeded, so the briefing 
 - **Documented and versioned.** Dataset columns take their descriptions from the data dictionary (an undocumented column stops the build), the BI layer is published as its own [data dictionary](docs/data_dictionary/bi/README.md), and dashboards are versioned as Superset exports in `superset/dashboards`, imported on every start.
 - **Designed first.** The dashboard follows a Figma prototype (overview, state and municipality views) and is built from native charts: KPIs with year-over-year change, rankings in tabs, rate trend with a reference line, a cross-filtering table and the LISA clusters.
 
+![Superset dashboard with the real data: Brazil, Jan-Sep 2026](docs/superset_overview.png)
+
+The same numbers in the Figma prototype and in Superset (Jan-Sep 2026): Brazil 22,662 CVLI victims and 14.11 per 100,000 inhabitants (-13.02% against Jan-Sep 2025), Rondônia 248 and 18.82, Porto Velho 87 and 22.29. More views: [state](docs/superset_state.png), [municipality](docs/superset_municipality.png), [Figma prototype](docs/figma_prototype.png).
+
 ## Tests and CI
 
 Every push and pull request runs these jobs on GitHub Actions (`.github/workflows/ci.yml`):
@@ -397,4 +401,5 @@ pytest
 ## Roadmap
 
 - **Current municipal development index:** add the IFDM (Firjan, annual, 2013-2023) next to the IDHM, whose latest municipal edition is from the 2010 Census, and use it in the social component of the IVSC.
+- **Power BI version of the dashboard:** the same semantic layer as a Power BI model (DAX measures over the `psi_bi` views), to compare both tools on the same numbers.
 - **Data quality monitoring:** a dashboard over `psi_ops.change_log` and the QA tables (rows per load, unmatched names per year).

@@ -21,7 +21,14 @@ cp .env.example .env        # set the passwords and SUPERSET_SECRET_KEY (openssl
 docker compose up --build
 ```
 
-Open <http://localhost:8088> and sign in with `SUPERSET_ADMIN_USER` / `SUPERSET_ADMIN_PASSWORD`. The service `superset-init` prepares everything before the web server starts, and can run again on every `up`: each step skips what is already done.
+Open <http://localhost:8088> and sign in with `SUPERSET_ADMIN_USER` / `SUPERSET_ADMIN_PASSWORD`.
+
+**Docker installed inside WSL (no Docker Desktop):** with the mirrored networking mode, Windows may not reach the ports Docker publishes (`curl` in WSL answers, the browser times out), while a program running directly in WSL is reachable. Bridge the port with `socat`, in a WSL terminal kept open, and open <http://localhost:8089>:
+
+```bash
+sudo apt-get install -y socat
+socat TCP-LISTEN:8089,fork,reuseaddr TCP:127.0.0.1:8088
+``` The service `superset-init` prepares everything before the web server starts, and can run again on every `up`: each step skips what is already done.
 
 | Step | What it does |
 |---|---|
@@ -63,6 +70,9 @@ The views keep the rules of the Gold layer: CVLI is the `victims` measure of the
 3. `docker compose up` (or `docker compose run --rm superset-init` with the stack running). The loader replaces the tables and views in one transaction; Superset keeps showing the previous data until it commits, and a file that does not match the manifest stops the load with the database untouched.
 
 ## Dashboard
+
+![Superset dashboard - Rondônia, Jan-Sep 2026](../docs/superset_state.png)
+
 
 `dashboards/public_safety_overview.zip` is the dashboard of the [Figma prototype](https://www.figma.com/design/RQWlqVRFHPv3rzGubjDy0T), built with native Superset charts:
 

@@ -1,0 +1,515 @@
+{
+  "exported_at": "2026-11-12T17:13:45Z",
+  "window_start": "2025-10-01",
+  "window_end": "2026-09-01",
+  "tables": [
+    {
+      "table": "municipality_analytics",
+      "file": "municipality_analytics.csv.gz",
+      "rows": 5571,
+      "primary_key": [
+        "municipality_code"
+      ],
+      "columns": [
+        {
+          "name": "municipality_code",
+          "type": "string"
+        },
+        {
+          "name": "state_code",
+          "type": "string"
+        },
+        {
+          "name": "municipality_name",
+          "type": "string"
+        },
+        {
+          "name": "region_name",
+          "type": "string"
+        },
+        {
+          "name": "population",
+          "type": "bigint"
+        },
+        {
+          "name": "population_year",
+          "type": "int"
+        },
+        {
+          "name": "gdp_year",
+          "type": "int"
+        },
+        {
+          "name": "gdp_thousand_brl",
+          "type": "double"
+        },
+        {
+          "name": "gdp_population_year",
+          "type": "int"
+        },
+        {
+          "name": "gdp_per_capita_brl",
+          "type": "double"
+        },
+        {
+          "name": "idhm",
+          "type": "double"
+        },
+        {
+          "name": "idhm_education",
+          "type": "double"
+        },
+        {
+          "name": "idhm_longevity",
+          "type": "double"
+        },
+        {
+          "name": "idhm_income",
+          "type": "double"
+        },
+        {
+          "name": "idhm_year",
+          "type": "int"
+        },
+        {
+          "name": "fleet_total",
+          "type": "bigint"
+        },
+        {
+          "name": "fleet_reference",
+          "type": "string"
+        },
+        {
+          "name": "cvli_victims",
+          "type": "bigint"
+        },
+        {
+          "name": "has_sinesp_records",
+          "type": "boolean"
+        },
+        {
+          "name": "months_covered",
+          "type": "int"
+        },
+        {
+          "name": "window_start",
+          "type": "date"
+        },
+        {
+          "name": "window_end",
+          "type": "date"
+        },
+        {
+          "name": "cvli_rate_100k",
+          "type": "double"
+        },
+        {
+          "name": "cvli_z_score_state",
+          "type": "double"
+        },
+        {
+          "name": "cvli_z_score_national",
+          "type": "double"
+        },
+        {
+          "name": "is_state_hotspot",
+          "type": "boolean"
+        },
+        {
+          "name": "is_national_hotspot",
+          "type": "boolean"
+        },
+        {
+          "name": "crime_component",
+          "type": "double"
+        },
+        {
+          "name": "social_component",
+          "type": "double"
+        },
+        {
+          "name": "ivsc_score",
+          "type": "double"
+        },
+        {
+          "name": "economic_tier",
+          "type": "string"
+        }
+      ],
+      "sha256": "4e9d614e64493ffa50d2526063ada6b4191778817f6afb0c4080e3da4f2bf47a",
+      "size_bytes": 288982
+    },
+    {
+      "table": "municipality_spatial_metrics",
+      "file": "municipality_spatial_metrics.csv.gz",
+      "rows": 5571,
+      "primary_key": [
+        "municipality_code"
+      ],
+      "columns": [
+        {
+          "name": "municipality_code",
+          "type": "string"
+        },
+        {
+          "name": "centroid_lat",
+          "type": "double"
+        },
+        {
+          "name": "centroid_lon",
+          "type": "double"
+        },
+        {
+          "name": "area_km2",
+          "type": "double"
+        },
+        {
+          "name": "neighbor_count",
+          "type": "bigint"
+        },
+        {
+          "name": "neighbor_avg_cvli_rate_100k",
+          "type": "double"
+        },
+        {
+          "name": "neighbor_national_hotspots",
+          "type": "bigint"
+        },
+        {
+          "name": "lisa_z_sim",
+          "type": "double"
+        },
+        {
+          "name": "lisa_i",
+          "type": "double"
+        },
+        {
+          "name": "lisa_p_value",
+          "type": "double"
+        },
+        {
+          "name": "lisa_cluster",
+          "type": "string"
+        },
+        {
+          "name": "eb_rate_std",
+          "type": "double"
+        },
+        {
+          "name": "degree",
+          "type": "bigint"
+        },
+        {
+          "name": "betweenness",
+          "type": "double"
+        },
+        {
+          "name": "community_id",
+          "type": "bigint"
+        },
+        {
+          "name": "global_moran_i",
+          "type": "double"
+        },
+        {
+          "name": "global_moran_p_value",
+          "type": "double"
+        }
+      ],
+      "sha256": "261880462cede0cd8cb5e7e3d04c2cc40ad246f9d92b1f56c738fab81179875d",
+      "size_bytes": 210702
+    },
+    {
+      "table": "state_analytics",
+      "file": "state_analytics.csv.gz",
+      "rows": 27,
+      "primary_key": [
+        "state_code"
+      ],
+      "columns": [
+        {
+          "name": "state_code",
+          "type": "string"
+        },
+        {
+          "name": "state_name",
+          "type": "string"
+        },
+        {
+          "name": "region_code",
+          "type": "string"
+        },
+        {
+          "name": "region_name",
+          "type": "string"
+        },
+        {
+          "name": "population",
+          "type": "bigint"
+        },
+        {
+          "name": "fleet_total",
+          "type": "bigint"
+        },
+        {
+          "name": "cvli_victims",
+          "type": "double"
+        },
+        {
+          "name": "vehicle_crimes",
+          "type": "double"
+        },
+        {
+          "name": "drug_seizure_kg",
+          "type": "double"
+        },
+        {
+          "name": "months_covered",
+          "type": "int"
+        },
+        {
+          "name": "window_start",
+          "type": "date"
+        },
+        {
+          "name": "window_end",
+          "type": "date"
+        },
+        {
+          "name": "cvli_rate_100k",
+          "type": "double"
+        },
+        {
+          "name": "vehicle_crime_rate_1k_fleet",
+          "type": "double"
+        }
+      ],
+      "sha256": "1e4b5a33b1a2440d4cfb941c80ca464d05f78827bab182fac27c6b785ec0b42d",
+      "size_bytes": 1283
+    },
+    {
+      "table": "graph_communities",
+      "file": "graph_communities.csv.gz",
+      "rows": 30,
+      "primary_key": [
+        "community_id"
+      ],
+      "columns": [
+        {
+          "name": "community_id",
+          "type": "bigint"
+        },
+        {
+          "name": "municipalities",
+          "type": "bigint"
+        },
+        {
+          "name": "states",
+          "type": "string"
+        },
+        {
+          "name": "population",
+          "type": "bigint"
+        },
+        {
+          "name": "cvli_victims",
+          "type": "double"
+        },
+        {
+          "name": "cvli_rate_100k",
+          "type": "double"
+        }
+      ],
+      "sha256": "84e95dc802c8033d98b414c74c71d1d066390eabccf6205f1e45f5076193e139",
+      "size_bytes": 673
+    },
+    {
+      "table": "dim_state",
+      "file": "dim_state.csv.gz",
+      "rows": 27,
+      "primary_key": [
+        "state_code"
+      ],
+      "columns": [
+        {
+          "name": "state_code",
+          "type": "string"
+        },
+        {
+          "name": "state_name",
+          "type": "string"
+        },
+        {
+          "name": "region_code",
+          "type": "string"
+        },
+        {
+          "name": "region_name",
+          "type": "string"
+        }
+      ],
+      "sha256": "f4d00c46947f126b86188b1538d01b26584ad0f7fb5b9ac646e174243ffd1b26",
+      "size_bytes": 359
+    },
+    {
+      "table": "dim_event",
+      "file": "dim_event.csv.gz",
+      "rows": 31,
+      "primary_key": [
+        "event_id"
+      ],
+      "columns": [
+        {
+          "name": "event_id",
+          "type": "bigint"
+        },
+        {
+          "name": "event_name",
+          "type": "string"
+        },
+        {
+          "name": "event_level",
+          "type": "string"
+        },
+        {
+          "name": "is_cvli",
+          "type": "boolean"
+        },
+        {
+          "name": "is_vehicle_crime",
+          "type": "boolean"
+        },
+        {
+          "name": "is_drug_seizure",
+          "type": "boolean"
+        }
+      ],
+      "sha256": "372c0695b4c9bb9942b45358e846a50e6eaf82a24384e87a54596bed3e041f11",
+      "size_bytes": 935
+    },
+    {
+      "table": "dim_date",
+      "file": "dim_date.csv.gz",
+      "rows": 21,
+      "primary_key": [
+        "date_id"
+      ],
+      "columns": [
+        {
+          "name": "date_id",
+          "type": "int"
+        },
+        {
+          "name": "date",
+          "type": "date"
+        },
+        {
+          "name": "year",
+          "type": "int"
+        },
+        {
+          "name": "quarter",
+          "type": "int"
+        },
+        {
+          "name": "month",
+          "type": "int"
+        },
+        {
+          "name": "year_month",
+          "type": "string"
+        }
+      ],
+      "sha256": "bb24d9f8212d72ed96a411811e7c4256352426e10eb9efb74a0aecf502780390",
+      "size_bytes": 250
+    },
+    {
+      "table": "fact_occurrences",
+      "file": "fact_occurrences.csv.gz",
+      "rows": 1394556,
+      "primary_key": [
+        "municipality_code",
+        "event_id",
+        "agency",
+        "date_id",
+        "measure_type"
+      ],
+      "columns": [
+        {
+          "name": "municipality_code",
+          "type": "string"
+        },
+        {
+          "name": "event_id",
+          "type": "bigint"
+        },
+        {
+          "name": "agency",
+          "type": "string"
+        },
+        {
+          "name": "date_id",
+          "type": "int"
+        },
+        {
+          "name": "measure_type",
+          "type": "string"
+        },
+        {
+          "name": "count",
+          "type": "bigint"
+        },
+        {
+          "name": "year",
+          "type": "int"
+        }
+      ],
+      "sha256": "3351fbd1996b1f872d3eae7bf5f706f22efa60cd63a0c7ac8bb18eb9b841953d",
+      "size_bytes": 4690725
+    },
+    {
+      "table": "fact_state_occurrences",
+      "file": "fact_state_occurrences.csv.gz",
+      "rows": 23505,
+      "primary_key": [
+        "state_code",
+        "event_id",
+        "agency",
+        "date_id",
+        "measure_type"
+      ],
+      "columns": [
+        {
+          "name": "state_code",
+          "type": "string"
+        },
+        {
+          "name": "event_id",
+          "type": "bigint"
+        },
+        {
+          "name": "agency",
+          "type": "string"
+        },
+        {
+          "name": "date_id",
+          "type": "int"
+        },
+        {
+          "name": "measure_type",
+          "type": "string"
+        },
+        {
+          "name": "value",
+          "type": "double"
+        },
+        {
+          "name": "year",
+          "type": "int"
+        }
+      ],
+      "sha256": "b987a83db87d043adf46959f53fce79093c4b1171fe86806bcba4ceca3a6d04e",
+      "size_bytes": 132222
+    }
+  ]
+}
