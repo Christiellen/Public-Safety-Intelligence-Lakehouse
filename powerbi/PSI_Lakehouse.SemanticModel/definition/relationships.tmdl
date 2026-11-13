@@ -1,0 +1,11 @@
+relationship f1ad686f-2f3d-58ae-bfe1-3307578cdb40
+	fromColumn: CVLI.'Area key'
+	toColumn: Area.'Area key'
+
+relationship e96cdb79-b6ff-561d-a8fc-bba754d84318
+	fromColumn: CVLI.'Date ID'
+	toColumn: Date.'Date ID'
+
+relationship 690f341b-46f5-5ebd-9c17-d54bdb4f86d7
+	fromColumn: Area.'State code'
+	toColumn: State.'State code'

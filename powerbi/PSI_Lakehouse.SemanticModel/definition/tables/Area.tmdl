@@ -1,0 +1,207 @@
+/// One row per municipality (IBGE) plus one Not assigned area per state, which holds the CVLI victims of the state facts without informed municipality.
+table Area
+	lineageTag: 66f366a9-b22b-5a38-ad08-d6f33306c4a3
+
+	/// Municipality code, or NA-<state> for the Not assigned area.
+	column 'Area key'
+		dataType: string
+		isHidden
+		lineageTag: 4a19a2c1-6b35-5504-a1e9-fa42b315e4ef
+		summarizeBy: none
+		sourceColumn: Area key
+
+		annotation SummarizationSetBy = User
+
+	/// IBGE 7-digit municipality code. Blank on the Not assigned areas.
+	column 'Municipality code'
+		dataType: string
+		lineageTag: cee6ee6e-cb3b-5fd3-a2c5-1265124bca12
+		summarizeBy: none
+		sourceColumn: Municipality code
+
+		annotation SummarizationSetBy = User
+
+	column 'Municipality name'
+		dataType: string
+		lineageTag: 73bd3f68-6a69-5d31-b2c7-28921327aead
+		summarizeBy: none
+		sourceColumn: Municipality name
+
+		annotation SummarizationSetBy = User
+
+	/// Municipality name and state code, e.g. Porto Velho (RO). Names repeat across states.
+	column Municipality
+		dataType: string
+		lineageTag: 319590d1-ab01-5b4b-9aaa-b3111f08e5d4
+		summarizeBy: none
+		sourceColumn: Municipality
+
+		annotation SummarizationSetBy = User
+
+	column 'State code'
+		dataType: string
+		isHidden
+		lineageTag: e525a964-dab8-5e3b-9808-0d6b3680bafe
+		summarizeBy: none
+		sourceColumn: State code
+
+		annotation SummarizationSetBy = User
+
+	/// False on the Not assigned areas.
+	column 'Is municipality'
+		dataType: boolean
+		lineageTag: 747a2f26-36f0-5f17-b659-6dd510fe5db8
+		summarizeBy: none
+		sourceColumn: Is municipality
+
+		annotation SummarizationSetBy = User
+
+	column 'Has SINESP records'
+		dataType: boolean
+		lineageTag: 4e1b0d28-4c8f-5037-80b1-f3945dc7f4ce
+		summarizeBy: none
+		sourceColumn: Has SINESP records
+
+		annotation SummarizationSetBy = User
+
+	/// Latest population estimate (IBGE). Use the measure Population.
+	column 'Population estimate'
+		dataType: int64
+		isHidden
+		formatString: #,0
+		lineageTag: 6c37a7e4-fcfa-5cfe-9681-452c3e8cf9cf
+		summarizeBy: none
+		sourceColumn: Population estimate
+
+		annotation SummarizationSetBy = User
+
+	column 'Population year'
+		dataType: int64
+		formatString: 0
+		lineageTag: 170da95c-c4f6-50af-abca-a29cb3a240ab
+		summarizeBy: none
+		sourceColumn: Population year
+
+		annotation SummarizationSetBy = User
+
+	/// Municipal Human Development Index (2010).
+	column IDHM
+		dataType: double
+		formatString: 0.000
+		lineageTag: 48ab1824-bb08-5869-b731-48f7e92481b0
+		summarizeBy: none
+		sourceColumn: IDHM
+
+		annotation SummarizationSetBy = User
+
+	/// Social & Criminal Vulnerability Index (0 to 1), fixed 12-month window.
+	column IVSC
+		dataType: double
+		formatString: 0.0000
+		lineageTag: 93c8aeed-332b-54c2-a1be-8752fb55a57c
+		summarizeBy: none
+		sourceColumn: IVSC
+
+		annotation SummarizationSetBy = User
+
+	/// Z-score of the CVLI rate against all municipalities with 20,000+ inhabitants.
+	column 'National Z-score'
+		dataType: double
+		formatString: 0.00
+		lineageTag: dd0f7b10-afce-54c8-b151-f29c3453d8a3
+		summarizeBy: none
+		sourceColumn: National Z-score
+
+		annotation SummarizationSetBy = User
+
+	/// National Z-score >= 2.
+	column 'National hotspot'
+		dataType: boolean
+		lineageTag: 9b1f4c1e-4599-51a0-9595-8c9fbb72510f
+		summarizeBy: none
+		sourceColumn: National hotspot
+
+		annotation SummarizationSetBy = User
+
+	/// LISA cluster at 5% (High-High, Low-Low, High-Low, Low-High, Not significant, No neighbors) or No data.
+	column 'LISA cluster'
+		dataType: string
+		lineageTag: 52881aff-07f8-5d9b-bbe3-2bc7a6101152
+		summarizeBy: none
+		sourceColumn: LISA cluster
+
+		annotation SummarizationSetBy = User
+
+	column 'LISA p-value'
+		dataType: double
+		formatString: 0.000
+		lineageTag: 0206a813-12e4-5121-9dee-49ceca2631bb
+		summarizeBy: none
+		sourceColumn: LISA p-value
+
+		annotation SummarizationSetBy = User
+
+	partition Area = m
+		mode: import
+		source =
+				let
+				    Spatial = Table.TransformColumnTypes(
+				        Table.SelectColumns(GoldTable("municipality_spatial_metrics"), {"municipality_code", "lisa_cluster", "lisa_p_value"}),
+				        {{"lisa_p_value", type number}},
+				        "en-US"
+				    ),
+				    WithSpatial = Table.NestedJoin(Municipalities, {"municipality_code"}, Spatial, {"municipality_code"}, "s", JoinKind.LeftOuter),
+				    Expanded = Table.ExpandTableColumn(WithSpatial, "s", {"lisa_cluster", "lisa_p_value"}),
+				    Lisa = Table.TransformColumns(
+				        Expanded,
+				        {{"lisa_cluster", each if _ = null or _ = "" then "No data" else _, type text}}
+				    ),
+				    Municipal = Table.AddColumn(
+				        Table.AddColumn(
+				            Table.AddColumn(Lisa, "area_key", each [municipality_code], type text),
+				            "municipality_label", each [municipality_name] & " (" & [state_code] & ")", type text
+				        ),
+				        "is_municipality", each true, type logical
+				    ),
+				    // One "Not assigned" area per state: CVLI victims of the state facts without informed municipality
+				    States = Table.SelectColumns(GoldTable("dim_state"), {"state_code"}),
+				    Unassigned = Table.FromRecords(
+				        List.Transform(
+				            Table.ToRecords(States),
+				            (r) => [
+				                area_key = "NA-" & r[state_code], municipality_code = null, municipality_name = "Not assigned",
+				                municipality_label = "Not assigned (" & r[state_code] & ")", state_code = r[state_code],
+				                is_municipality = false, has_sinesp_records = false, population = 0, population_year = null,
+				                idhm = null, ivsc_score = null, cvli_z_score_national = null, is_national_hotspot = false,
+				                lisa_cluster = null, lisa_p_value = null
+				            ]
+				        )
+				    ),
+				    Combined = Table.Combine({
+				        Table.SelectColumns(Municipal, Table.ColumnNames(Unassigned)),
+				        Unassigned
+				    }),
+				    Typed = Table.TransformColumnTypes(
+				        Combined,
+				        {
+				            {"area_key", type text}, {"municipality_code", type text}, {"municipality_name", type text},
+				            {"municipality_label", type text}, {"state_code", type text}, {"is_municipality", type logical},
+				            {"has_sinesp_records", type logical}, {"population", Int64.Type}, {"population_year", Int64.Type},
+				            {"idhm", type number}, {"ivsc_score", type number}, {"cvli_z_score_national", type number},
+				            {"is_national_hotspot", type logical}, {"lisa_cluster", type text}, {"lisa_p_value", type number}
+				        }
+				    ),
+				    Renamed = Table.RenameColumns(
+				        Typed,
+				        {
+				            {"area_key", "Area key"}, {"municipality_code", "Municipality code"}, {"municipality_name", "Municipality name"},
+				            {"municipality_label", "Municipality"}, {"state_code", "State code"}, {"is_municipality", "Is municipality"},
+				            {"has_sinesp_records", "Has SINESP records"}, {"population", "Population estimate"}, {"population_year", "Population year"},
+				            {"idhm", "IDHM"}, {"ivsc_score", "IVSC"}, {"cvli_z_score_national", "National Z-score"},
+				            {"is_national_hotspot", "National hotspot"}, {"lisa_cluster", "LISA cluster"}, {"lisa_p_value", "LISA p-value"}
+				        }
+				    )
+				in
+				    Renamed
+
+	annotation PBI_ResultType = Table

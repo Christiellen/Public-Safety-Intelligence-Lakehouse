@@ -1,0 +1,42 @@
+/// Indicators of the municipality profile (rows of the profile table).
+table 'Profile item'
+	lineageTag: d7bf4581-fd97-5a6e-8a4c-47e307529196
+
+	column 'Item order'
+		dataType: int64
+		isHidden
+		formatString: 0
+		lineageTag: ec4cf9d7-bdc7-5c85-a3ac-8415f88a9574
+		summarizeBy: none
+		sourceColumn: Item order
+
+		annotation SummarizationSetBy = User
+
+	column Indicator
+		dataType: string
+		lineageTag: 7de13f3f-6d13-5089-817e-98df3bbb89cd
+		summarizeBy: none
+		sourceColumn: Indicator
+		sortByColumn: 'Item order'
+
+		annotation SummarizationSetBy = User
+
+	partition 'Profile item' = m
+		mode: import
+		source =
+				let
+				    Source = #table(
+				        type table [#"Item order" = Int64.Type, Indicator = text],
+				        {
+				            {1, "Population"},
+				            {2, "IVSC - 12-month window"},
+				            {3, "National Z-score"},
+				            {4, "National hotspot"},
+				            {5, "LISA cluster"},
+				            {6, "IDHM (HDI) - 2010"}
+				        }
+				    )
+				in
+				    Source
+
+	annotation PBI_ResultType = Table

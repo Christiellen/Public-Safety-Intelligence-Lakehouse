@@ -1,0 +1,59 @@
+/// Brazilian states (27 federative units) and regions.
+table State
+	lineageTag: 8152cc36-f946-5b10-b3e7-9c01100f27b7
+
+	/// Two-letter state code (UF).
+	column 'State code'
+		dataType: string
+		lineageTag: 0e0e84cd-738f-5de6-8f71-0930386eabb3
+		summarizeBy: none
+		sourceColumn: State code
+
+		annotation SummarizationSetBy = User
+
+	/// State name.
+	column 'State name'
+		dataType: string
+		lineageTag: a046c595-0a7d-5868-acce-6b1ebb28c633
+		summarizeBy: none
+		sourceColumn: State name
+
+		annotation SummarizationSetBy = User
+
+	column 'Region code'
+		dataType: string
+		isHidden
+		lineageTag: 4961f33a-bfcb-5c23-b2f8-3a08d3c35d12
+		summarizeBy: none
+		sourceColumn: Region code
+
+		annotation SummarizationSetBy = User
+
+	/// Region of Brazil (IBGE).
+	column 'Region name'
+		dataType: string
+		lineageTag: 88f5cf78-2b08-516d-931e-bb3d750012d9
+		summarizeBy: none
+		sourceColumn: Region name
+
+		annotation SummarizationSetBy = User
+
+	partition State = m
+		mode: import
+		source =
+				let
+				    Source = GoldTable("dim_state"),
+				    Columns = Table.SelectColumns(Source, {"state_code", "state_name", "region_code", "region_name"}),
+				    Typed = Table.TransformColumnTypes(
+				        Columns,
+				        {{"state_code", type text}, {"state_name", type text}, {"region_code", type text}, {"region_name", type text}},
+				        "en-US"
+				    ),
+				    Renamed = Table.RenameColumns(
+				        Typed,
+				        {{"state_code", "State code"}, {"state_name", "State name"}, {"region_code", "Region code"}, {"region_name", "Region name"}}
+				    )
+				in
+				    Renamed
+
+	annotation PBI_ResultType = Table

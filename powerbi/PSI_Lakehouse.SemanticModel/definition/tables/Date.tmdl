@@ -1,0 +1,99 @@
+/// Months covered by the facts.
+table Date
+	lineageTag: b6ad62ce-a0a5-5bc9-9383-1e77f2e042cb
+
+	column 'Date ID'
+		dataType: int64
+		isHidden
+		formatString: 0
+		lineageTag: 5f07d0a8-3197-5399-a632-adf1992e6f7c
+		summarizeBy: none
+		sourceColumn: Date ID
+
+		annotation SummarizationSetBy = User
+
+	/// First day of the month.
+	column Month
+		dataType: dateTime
+		formatString: mmm yyyy
+		lineageTag: 6c492397-8ad6-5b13-ad84-a35a2f59d144
+		summarizeBy: none
+		sourceColumn: Month
+
+		annotation SummarizationSetBy = User
+
+		annotation UnderlyingDateTimeDataType = Date
+
+	column Year
+		dataType: int64
+		formatString: 0
+		lineageTag: ebc6f2f3-8499-5d74-be6e-43ac842dc70d
+		summarizeBy: none
+		sourceColumn: Year
+
+		annotation SummarizationSetBy = User
+
+	column Quarter
+		dataType: int64
+		formatString: 0
+		lineageTag: fae0aacd-4a41-56a3-a56a-7725f35b26b2
+		summarizeBy: none
+		sourceColumn: Quarter
+
+		annotation SummarizationSetBy = User
+
+	column 'Month number'
+		dataType: int64
+		formatString: 0
+		lineageTag: 149dfe0e-5efd-5f93-bc7c-42509baaa0dd
+		summarizeBy: none
+		sourceColumn: Month number
+
+		annotation SummarizationSetBy = User
+
+	/// Month as YYYY-MM.
+	column 'Year month'
+		dataType: string
+		lineageTag: c7fe1b90-a122-5f58-ad31-5fd9cf1e11dd
+		summarizeBy: none
+		sourceColumn: Year month
+		sortByColumn: 'Month index'
+
+		annotation SummarizationSetBy = User
+
+	/// Year x 12 + month, for year-over-year comparisons.
+	column 'Month index'
+		dataType: int64
+		isHidden
+		formatString: 0
+		lineageTag: 09ddf5c9-d250-5ba4-80d4-2f7d53f33135
+		summarizeBy: none
+		sourceColumn: Month index
+
+		annotation SummarizationSetBy = User
+
+	partition Date = m
+		mode: import
+		source =
+				let
+				    Source = GoldTable("dim_date"),
+				    Typed = Table.TransformColumnTypes(
+				        Table.SelectColumns(Source, {"date_id", "date", "year", "quarter", "month", "year_month"}),
+				        {
+				            {"date_id", Int64.Type}, {"date", type date}, {"year", Int64.Type}, {"quarter", Int64.Type},
+				            {"month", Int64.Type}, {"year_month", type text}
+				        },
+				        "en-US"
+				    ),
+				    Index = Table.AddColumn(Typed, "month_index", each [year] * 12 + [month], Int64.Type),
+				    Renamed = Table.RenameColumns(
+				        Index,
+				        {
+				            {"date_id", "Date ID"}, {"date", "Month"}, {"year", "Year"}, {"quarter", "Quarter"},
+				            {"month", "Month number"}, {"year_month", "Year month"}, {"month_index", "Month index"}
+				        }
+				    )
+				in
+				    Renamed
+
+	annotation PBI_ResultType = Table

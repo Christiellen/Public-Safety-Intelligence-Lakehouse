@@ -1,0 +1,76 @@
+/// CVLI victims by area and month. The Not assigned rows make sums by state equal the state facts.
+table CVLI
+	lineageTag: 6e7705fb-9442-5afe-b9de-a547c28f709c
+
+	column 'Area key'
+		dataType: string
+		isHidden
+		lineageTag: c95adf88-f9b3-5fd0-9457-b55c5a33ae54
+		summarizeBy: none
+		sourceColumn: Area key
+
+		annotation SummarizationSetBy = User
+
+	column 'Date ID'
+		dataType: int64
+		isHidden
+		formatString: 0
+		lineageTag: 9593fb5c-1378-5625-931b-6ebbb43e1c2e
+		summarizeBy: none
+		sourceColumn: Date ID
+
+		annotation SummarizationSetBy = User
+
+	/// CVLI victims of the area in the month. Use the measure CVLI victims.
+	column Victims
+		dataType: int64
+		isHidden
+		formatString: #,0
+		lineageTag: 655ee18a-37f5-5849-b95f-00ac0a493bc9
+		summarizeBy: sum
+		sourceColumn: Victims
+
+		annotation SummarizationSetBy = User
+
+	partition CVLI = m
+		mode: import
+		source =
+				let
+				    MunicipalRows = Table.RenameColumns(
+				        Table.SelectColumns(MunicipalCvli, {"municipality_code", "date_id", "cvli_victims"}),
+				        {{"municipality_code", "area_key"}}
+				    ),
+				    FromMunicipalities = Table.Group(
+				        MunicipalCvli,
+				        {"state_code", "date_id"},
+				        {{"municipal_victims", each List.Sum([cvli_victims]), type number}}
+				    ),
+				    Compared = Table.NestedJoin(
+				        StateCvli, {"state_code", "date_id"}, FromMunicipalities, {"state_code", "date_id"}, "m", JoinKind.FullOuter
+				    ),
+				    Expanded = Table.ExpandTableColumn(
+				        Compared, "m", {"state_code", "date_id", "municipal_victims"}, {"m_state_code", "m_date_id", "municipal_victims"}
+				    ),
+				    UnassignedRows = Table.FromRecords(
+				        List.Transform(
+				            Table.ToRecords(Expanded),
+				            (r) => [
+				                area_key = "NA-" & (if r[state_code] <> null then r[state_code] else r[m_state_code]),
+				                date_id = if r[date_id] <> null then r[date_id] else r[m_date_id],
+				                cvli_victims = (if r[cvli_victims] <> null then r[cvli_victims] else 0)
+				                    - (if r[municipal_victims] <> null then r[municipal_victims] else 0)
+				            ]
+				        )
+				    ),
+				    Combined = Table.Combine({MunicipalRows, UnassignedRows}),
+				    NonZero = Table.SelectRows(Combined, each [cvli_victims] <> 0),
+				    Typed = Table.TransformColumnTypes(
+				        NonZero, {{"area_key", type text}, {"date_id", Int64.Type}, {"cvli_victims", Int64.Type}}
+				    ),
+				    Renamed = Table.RenameColumns(
+				        Typed, {{"area_key", "Area key"}, {"date_id", "Date ID"}, {"cvli_victims", "Victims"}}
+				    )
+				in
+				    Renamed
+
+	annotation PBI_ResultType = Table

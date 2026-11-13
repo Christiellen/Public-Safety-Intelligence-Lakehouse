@@ -1,0 +1,52 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.4.0/schema.json",
+  "name": "footer",
+  "position": {
+    "x": 16,
+    "y": 1130,
+    "z": 14000,
+    "height": 44,
+    "width": 1248,
+    "tabOrder": 14000
+  },
+  "visual": {
+    "visualType": "textbox",
+    "objects": {
+      "general": [
+        {
+          "properties": {
+            "paragraphs": [
+              {
+                "textRuns": [
+                  {
+                    "value": "Sources: SINESP/MJSP (police records), IBGE, Atlas Brasil. Rates are annualized CVLI victims per 100,000 inhabitants. Municipal rankings include municipalities with 20,000+ inhabitants; victims without informed municipality count in the state totals only. Built with the Public Safety Intelligence Lakehouse.",
+                    "textStyle": {
+                      "fontSize": "8pt",
+                      "color": "#63748A"
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      ]
+    },
+    "visualContainerObjects": {
+      "background": [
+        {
+          "properties": {
+            "show": {
+              "expr": {
+                "Literal": {
+                  "Value": "false"
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "drillFilterOtherVisuals": true
+  }
+}

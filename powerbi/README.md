@@ -9,7 +9,7 @@ The same dashboard as the [Superset stack](../superset/README.md), built as a Po
 1. Export the Gold layer to `superset/data` (see [`superset/data/README.md`](../superset/data/README.md)). The Power BI model needs only the `.csv.gz` files.
 2. Open `PSI_Lakehouse.pbip` in Power BI Desktop (a recent version; the report uses the PBIR format).
 3. If the files are not in the default folder, go to **Transform data > Edit parameters** and set **DataFolder**. The default points to the repository inside WSL:
-   `\\wsl.localhost\Ubuntu\home\ramon\Public-Safety-Intelligence-Lakehouse\superset\data`
+   `\\wsl.localhost\Ubuntu\home\<user>\Public-Safety-Intelligence-Lakehouse\superset\data`
 4. **Refresh**. To get a single `.pbix` file, use **File > Save as**.
 
 ## Semantic model

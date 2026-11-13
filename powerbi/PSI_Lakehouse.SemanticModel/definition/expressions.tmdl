@@ -1,0 +1,111 @@
+/// Folder of the Gold export (superset/data): one <table>.csv.gz per Gold table, from notebook 21.
+expression DataFolder = "\\wsl.localhost\Ubuntu\home\<user>\Public-Safety-Intelligence-Lakehouse\superset\data" meta [IsParameterQuery = true, Type = "Text", IsParameterQueryRequired = true]
+	lineageTag: 8a171970-bebf-5761-93a8-1355d973dbe5
+
+	annotation PBI_ResultType = Text
+
+/// Reads one Gold table exported as CSV.gz.
+expression GoldTable =
+		(name as text) as table =>
+		let
+		    Folder = Text.TrimEnd(DataFolder, {"\", "/"}),
+		    Content = File.Contents(Folder & "\" & name & ".csv.gz"),
+		    Csv = Csv.Document(
+		        Binary.Decompress(Content, Compression.GZip),
+		        [Delimiter = ",", Encoding = 65001, QuoteStyle = QuoteStyle.Csv]
+		    ),
+		    Promoted = Table.PromoteHeaders(Csv, [PromoteAllScalars = true])
+		in
+		    Promoted
+	lineageTag: 8a63dff4-737b-597e-9589-d985a60d0554
+
+	annotation PBI_ResultType = Function
+
+/// Events counted as CVLI (is_cvli in dim_event).
+expression CvliEvents =
+		let
+		    Events = Table.TransformColumnTypes(
+		        GoldTable("dim_event"),
+		        {{"event_id", Int64.Type}, {"is_cvli", type logical}},
+		        "en-US"
+		    ),
+		    Cvli = Table.SelectRows(Events, each [is_cvli] = true),
+		    Ids = Table.SelectColumns(Cvli, {"event_id"})
+		in
+		    Ids
+	lineageTag: 273aec0f-7fbd-5bfb-a295-1e03756b03d3
+
+	annotation PBI_ResultType = Table
+
+/// Municipal indicators of the Gold layer.
+expression Municipalities =
+		let
+		    Source = Table.TransformColumnTypes(
+		        GoldTable("municipality_analytics"),
+		        {
+		            {"population", Int64.Type}, {"population_year", Int64.Type}, {"idhm", type number},
+		            {"has_sinesp_records", type logical}, {"cvli_z_score_national", type number},
+		            {"is_national_hotspot", type logical}, {"ivsc_score", type number}
+		        },
+		        "en-US"
+		    ),
+		    Columns = Table.SelectColumns(
+		        Source,
+		        {
+		            "municipality_code", "municipality_name", "state_code", "population", "population_year",
+		            "idhm", "has_sinesp_records", "cvli_z_score_national", "is_national_hotspot", "ivsc_score"
+		        }
+		    )
+		in
+		    Columns
+	lineageTag: b5562ec9-d941-5f02-bbcd-180a2237fbfa
+
+	annotation PBI_ResultType = Table
+
+/// CVLI victims of the municipal facts, by municipality and month.
+expression MunicipalCvli =
+		let
+		    Facts = Table.TransformColumnTypes(
+		        GoldTable("fact_occurrences"),
+		        {{"event_id", Int64.Type}, {"date_id", Int64.Type}, {"count", type number}},
+		        "en-US"
+		    ),
+		    CvliIds = List.Buffer(CvliEvents[event_id]),
+		    Cvli = Table.SelectRows(Facts, each [measure_type] = "victims" and List.Contains(CvliIds, [event_id])),
+		    Grouped = Table.Group(
+		        Cvli,
+		        {"municipality_code", "date_id"},
+		        {{"cvli_victims", each List.Sum([count]), type number}}
+		    ),
+		    Joined = Table.NestedJoin(
+		        Grouped, {"municipality_code"},
+		        Table.SelectColumns(Municipalities, {"municipality_code", "state_code"}), {"municipality_code"},
+		        "m", JoinKind.Inner
+		    ),
+		    Known = Table.ExpandTableColumn(Joined, "m", {"state_code"})
+		in
+		    Known
+	lineageTag: 7a9e8eaf-e0a3-574b-862e-dd3667b99728
+
+	annotation PBI_ResultType = Table
+
+/// CVLI victims of the state facts, by state and month.
+expression StateCvli =
+		let
+		    Facts = Table.TransformColumnTypes(
+		        GoldTable("fact_state_occurrences"),
+		        {{"event_id", Int64.Type}, {"date_id", Int64.Type}, {"value", type number}},
+		        "en-US"
+		    ),
+		    CvliIds = List.Buffer(CvliEvents[event_id]),
+		    Cvli = Table.SelectRows(Facts, each [measure_type] = "victims" and List.Contains(CvliIds, [event_id])),
+		    Grouped = Table.Group(
+		        Cvli,
+		        {"state_code", "date_id"},
+		        {{"cvli_victims", each List.Sum([value]), type number}}
+		    )
+		in
+		    Grouped
+	lineageTag: 6b5ab669-819f-55ba-a0fb-ec960f718886
+
+	annotation PBI_ResultType = Table

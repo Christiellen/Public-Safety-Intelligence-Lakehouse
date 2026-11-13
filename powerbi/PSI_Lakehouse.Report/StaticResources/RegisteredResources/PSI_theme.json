@@ -1,0 +1,22 @@
+{
+  "name": "PSI_theme",
+  "dataColors": [
+    "#087F8C",
+    "#D98B1A",
+    "#173B5C",
+    "#5FA8B0",
+    "#63748A",
+    "#B4433F",
+    "#8FB9A8",
+    "#C9A227"
+  ],
+  "foreground": "#1F2933",
+  "background": "#FFFFFF",
+  "tableAccent": "#087F8C",
+  "textClasses": {
+    "label": {
+      "fontFace": "Segoe UI",
+      "color": "#1F2933"
+    }
+  }
+}

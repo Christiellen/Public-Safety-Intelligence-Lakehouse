@@ -9,3 +9,8 @@ reports/
 .env
 *.env
 !*.env.example
+
+# Power BI Desktop local files (PBIP)
+**/.pbi/localSettings.json
+**/.pbi/cache.abf
+*.pbix

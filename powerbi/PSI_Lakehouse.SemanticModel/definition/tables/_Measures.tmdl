@@ -1,0 +1,208 @@
+/// All measures of the model. The table has no data.
+table '_Measures'
+	lineageTag: 222b3255-0706-5685-a57a-c55da9557b1e
+
+	/// CVLI victims (intentional homicide, feminicide, robbery followed by death and bodily injury followed by death) in the selected areas and months.
+	measure 'CVLI victims' = SUM ( CVLI[Victims] )
+		formatString: #,0
+		displayFolder: Base
+		lineageTag: 2026c09d-5d9f-55d8-aa9e-c29e4ebc1043
+
+	/// Latest population estimate (IBGE) of the selected areas.
+	measure Population = SUM ( Area[Population estimate] )
+		formatString: #,0
+		displayFolder: Base
+		lineageTag: 42421afe-8d01-5b69-b164-a0b2ccd14e3c
+
+	/// Number of months in the selection.
+	measure 'Months in period' = COUNTROWS ( 'Date' )
+		formatString: #,0
+		displayFolder: Base
+		lineageTag: 1e77dc46-d6f9-5a44-a23e-35e0e6ebd081
+
+	/// Annualized CVLI victims per 100,000 inhabitants: victims x 12 / months, per 100,000. A ratio of sums, never an average of rates.
+	measure 'CVLI rate' =
+			DIVIDE (
+			    [CVLI victims] * 12 * 100000,
+			    [Population] * [Months in period]
+			)
+		formatString: #,0.00
+		displayFolder: Rates
+		lineageTag: 03c83e91-dbc3-5fe9-8f8f-07d9dc531768
+
+	/// CVLI rate of the whole selected period, the same in every month. Reference line of the rate trend.
+	measure 'Period rate' = CALCULATE ( [CVLI rate], ALLSELECTED ( 'Date' ) )
+		formatString: #,0.00
+		displayFolder: Rates
+		lineageTag: ceed0141-df1e-5c24-9a44-917aba3bf7de
+
+	/// CVLI victims in the same months of the previous year.
+	measure 'CVLI victims (previous year)' =
+			VAR _previous =
+			    SELECTCOLUMNS ( VALUES ( 'Date'[Month index] ), "Month index", 'Date'[Month index] - 12 )
+			RETURN
+			    CALCULATE ( [CVLI victims], REMOVEFILTERS ( 'Date' ), TREATAS ( _previous, 'Date'[Month index] ) )
+		formatString: #,0
+		displayFolder: Year over year
+		lineageTag: ff14497e-2f89-54b4-82d7-84ff48ffb755
+
+	/// CVLI victims of the selected months against the same months of the previous year. Blank when any of those previous months is missing from the data.
+	measure 'CVLI YoY change' =
+			VAR _months = VALUES ( 'Date'[Month index] )
+			VAR _previous =
+			    SELECTCOLUMNS ( _months, "Month index", 'Date'[Month index] - 12 )
+			VAR _available =
+			    CALCULATE ( COUNTROWS ( 'Date' ), REMOVEFILTERS ( 'Date' ), TREATAS ( _previous, 'Date'[Month index] ) )
+			VAR _victimsPrevious = [CVLI victims (previous year)]
+			RETURN
+			    IF (
+			        _available = COUNTROWS ( _months ) && _victimsPrevious > 0,
+			        DIVIDE ( [CVLI victims], _victimsPrevious ) - 1
+			    )
+		formatString: +0.00%;-0.00%;0.00%
+		displayFolder: Year over year
+		lineageTag: e5b2ab07-53a2-56e1-bf4c-6ebe6b0a3b09
+
+	/// Municipalities in a High-High LISA cluster (p < 0.05). Fixed 12-month window of the spatial analysis: the period and the municipality selection do not change it.
+	measure 'High-High municipalities' =
+			CALCULATE (
+			    COUNTROWS ( Area ),
+			    KEEPFILTERS ( Area[LISA cluster] = "High-High" ),
+			    REMOVEFILTERS ( Area[Municipality] )
+			)
+		formatString: #,0
+		displayFolder: Spatial
+		lineageTag: 4d5b1c45-306a-53b6-8628-53d9acb381ad
+
+	/// CVLI rate of the five states with the highest rate in the selection.
+	measure 'State rate (top 5)' =
+			IF (
+			    HASONEVALUE ( 'State'[State name] ),
+			    VAR _rate = [CVLI rate]
+			    VAR _candidates =
+			        CALCULATETABLE (
+			            ADDCOLUMNS ( VALUES ( 'State'[State name] ), "@rate", [CVLI rate] ),
+			            ALLSELECTED ( 'State' ),
+			            ALLSELECTED ( Area )
+			        )
+			    VAR _rank =
+			        COUNTROWS ( FILTER ( _candidates, [@rate] > _rate ) ) + 1
+			    RETURN
+			        IF ( NOT ISBLANK ( _rate ) && _rank <= 5, _rate )
+			)
+		formatString: #,0.00
+		displayFolder: Rankings
+		lineageTag: f7d2e9b8-2f66-548c-a1f2-a1c42e5beee5
+
+	/// CVLI rate of a municipality with SINESP records and 20,000+ inhabitants. Blank for smaller municipalities and for the Not assigned areas.
+	measure 'Municipal rate (20k+)' =
+			VAR _eligible =
+			    SELECTEDVALUE ( Area[Is municipality] ) = TRUE ()
+			        && SELECTEDVALUE ( Area[Has SINESP records] ) = TRUE ()
+			        && SELECTEDVALUE ( Area[Population estimate] ) >= 20000
+			RETURN
+			    IF ( _eligible, [CVLI rate] )
+		formatString: #,0.00
+		displayFolder: Rankings
+		lineageTag: 4a32ecb8-563a-5cbd-a471-23582bf65e0f
+
+	/// Rank of the municipality by CVLI rate among all selected municipalities with 20,000+ inhabitants. The candidates ignore the other columns of the visual (state code, LISA cluster), so a table ranks like a bar chart.
+	measure 'Municipal rank (20k+)' =
+			VAR _rate = [Municipal rate (20k+)]
+			VAR _candidates =
+			    CALCULATETABLE (
+			        ADDCOLUMNS ( VALUES ( Area[Municipality] ), "@rate", [Municipal rate (20k+)] ),
+			        ALLSELECTED ( Area ),
+			        ALLSELECTED ( 'State' ),
+			        KEEPFILTERS ( Area[Is municipality] = TRUE () ),
+			        KEEPFILTERS ( Area[Has SINESP records] = TRUE () ),
+			        KEEPFILTERS ( Area[Population estimate] >= 20000 )
+			    )
+			RETURN
+			    IF ( NOT ISBLANK ( _rate ), COUNTROWS ( FILTER ( _candidates, [@rate] > _rate ) ) + 1 )
+		formatString: 0
+		displayFolder: Rankings
+		lineageTag: 9fcba7c8-d5d2-5fde-aba7-d20c599f937a
+
+	/// CVLI rate of the five municipalities (20,000+ inhabitants) with the highest rate.
+	measure 'Municipal rate (top 5)' =
+			VAR _rank = [Municipal rank (20k+)]
+			RETURN
+			    IF ( NOT ISBLANK ( _rank ) && _rank <= 5, [Municipal rate (20k+)] )
+		formatString: #,0.00
+		displayFolder: Rankings
+		lineageTag: 96bc6be4-9715-5d71-b3fd-f0a88d8e7256
+
+	/// CVLI rate of the four municipalities (20,000+ inhabitants) with the highest rate, for the table.
+	measure 'Top 4 - CVLI rate' =
+			VAR _rank = [Municipal rank (20k+)]
+			RETURN
+			    IF ( NOT ISBLANK ( _rank ) && _rank <= 4, [Municipal rate (20k+)] )
+		formatString: #,0.00
+		displayFolder: Rankings
+		lineageTag: 4fabe3a2-d491-5b5e-8f46-aa17d727d9b3
+
+	/// CVLI victims of the four municipalities (20,000+ inhabitants) with the highest rate, for the table.
+	measure 'Top 4 - CVLI victims' =
+			VAR _rank = [Municipal rank (20k+)]
+			RETURN
+			    IF ( NOT ISBLANK ( _rank ) && _rank <= 4, [CVLI victims] )
+		formatString: #,0
+		displayFolder: Rankings
+		lineageTag: 3c870d8b-7ffc-5888-aee0-975f662c9c64
+
+	/// Background color of the LISA cluster cell: rose for High-High, light blue for Low-Low.
+	measure 'LISA cluster color' =
+			SWITCH (
+			    SELECTEDVALUE ( Area[LISA cluster] ),
+			    "High-High", "#F6DDE2",
+			    "Low-Low", "#DCEBF5"
+			)
+		displayFolder: Formatting
+		lineageTag: 9a288e44-5499-5898-90b5-4fcbb7bb3b90
+
+	/// Value of each indicator of the municipality profile. Blank unless exactly one municipality is selected.
+	measure 'Profile value' =
+			VAR _isOne =
+			    HASONEVALUE ( Area[Area key] ) && SELECTEDVALUE ( Area[Is municipality] ) = TRUE ()
+			VAR _population = SELECTEDVALUE ( Area[Population estimate] )
+			VAR _year = SELECTEDVALUE ( Area[Population year] )
+			VAR _ivsc = SELECTEDVALUE ( Area[IVSC] )
+			VAR _z = SELECTEDVALUE ( Area[National Z-score] )
+			VAR _lisa = SELECTEDVALUE ( Area[LISA cluster] )
+			VAR _p = SELECTEDVALUE ( Area[LISA p-value] )
+			VAR _idhm = SELECTEDVALUE ( Area[IDHM] )
+			RETURN
+			    IF (
+			        _isOne,
+			        SWITCH (
+			            SELECTEDVALUE ( 'Profile item'[Item order] ),
+			            1, FORMAT ( _population, "#,0" ) & " (" & _year & ")",
+			            2, IF ( ISBLANK ( _ivsc ), "n/a", FORMAT ( _ivsc, "0.0000" ) ),
+			            3, IF ( ISBLANK ( _z ), "n/a (under 20,000 inhabitants)", FORMAT ( _z, "0.00" ) ),
+			            4, IF ( SELECTEDVALUE ( Area[National hotspot] ) = TRUE (), "Yes", "No" ),
+			            5, _lisa & IF ( NOT ISBLANK ( _p ), " (p = " & FORMAT ( _p, "0.000" ) & ")" ),
+			            6, IF ( ISBLANK ( _idhm ), "n/a", FORMAT ( _idhm, "0.000" ) )
+			        )
+			    )
+		displayFolder: Profile
+		lineageTag: 4b1cdf6d-d35e-557f-aa39-7a1884ec69d3
+
+	column Dummy
+		dataType: string
+		isHidden
+		lineageTag: 27ec0436-a4b8-59ec-9430-7dcd4454839f
+		summarizeBy: none
+		sourceColumn: Dummy
+
+		annotation SummarizationSetBy = User
+
+	partition '_Measures' = m
+		mode: import
+		source =
+				let
+				    Source = #table(type table [Dummy = text], {})
+				in
+				    Source
+
+	annotation PBI_ResultType = Table
