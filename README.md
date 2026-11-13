@@ -45,10 +45,11 @@ graph LR
         N4J["Neo4j AuraDB<br/>Municipality - State - Community<br/>BORDERS - IN_STATE - IN_COMMUNITY"]
     end
 
-    subgraph BI["BI - Superset stack (docker compose)"]
+    subgraph BI["BI - Superset stack (docker compose) and Power BI"]
         EXP["21_gold_export_bi<br/>CSV + manifest"]
         PG["PostgreSQL<br/>psi_gold tables - psi_bi views"]
         SUPS["Superset 6.1<br/>datasets + dashboard"]
+        PBI["Power BI (PBIP)<br/>star schema + DAX measures"]
     end
 
     subgraph Agents["AI assistant - LangGraph + Gemini"]
@@ -88,6 +89,7 @@ graph LR
     Gold --> EXP
     EXP -.hash + row checks.-> PG
     PG -.read-only role.-> SUPS
+    EXP -.Power Query.-> PBI
     SUP --> SQLA
     SUP --> GRA
     DD -.allowlist + schema.-> SQLA
