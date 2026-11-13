@@ -346,6 +346,10 @@ A weekly run against the real workspace: the job had succeeded, so the briefing 
 
 The same numbers in the Figma prototype and in Superset (Jan-Sep 2026): Brazil 22,662 CVLI victims and 14.11 per 100,000 inhabitants (-13.02% against Jan-Sep 2025), Rondônia 248 and 18.82, Porto Velho 87 and 22.29. More views: [state](docs/superset_state.png), [municipality](docs/superset_municipality.png), [Figma prototype](docs/figma_prototype.png).
 
+**Power BI version.** [`powerbi/`](powerbi/README.md) has the same dashboard as a Power BI project (PBIP): a star schema in TMDL over the same Gold export, every DAX measure in a separate `_Measures` table (rates as ratios of sums, year over year with `TREATAS`, rankings with `RANKX`) and the report in PBIR, all versioned as text.
+
+![Power BI version: Porto Velho (RO), Jan-Sep 2026](docs/powerbi_municipality.png)
+
 ## Tests and CI
 
 Every push and pull request runs these jobs on GitHub Actions (`.github/workflows/ci.yml`):
@@ -370,6 +374,7 @@ How it works: `tests/notebook_loader.py` executes the Databricks source files ce
 | `test_job_definition` | The Databricks job: notebooks 01-16 scheduled once, no cycles, and every table read and change-log input produced by an upstream task |
 | `test_evaluation_helpers` | Notebook 19: numbers in Brazilian and English formats, names with or without accents |
 | `test_superset_stack` | Notebook 21 and the Superset stack, on a PostgreSQL service container: export complete and sorted, nulls kept, changed files rejected, views equal to the Gold totals, read-only role refused on Gold and on writes, every dataset column documented and every metric valid SQL |
+| `test_powerbi_project` | Power BI project (PBIP): every field of the report exists in the model, every measure lives in `_Measures`, DAX references, relationships and sort-by columns resolve, and Power Query reads only tables exported by notebook 21 |
 
 Run locally (Java 17+ and Python 3.12):
 
@@ -401,5 +406,4 @@ pytest
 ## Roadmap
 
 - **Current municipal development index:** add the IFDM (Firjan, annual, 2013-2023) next to the IDHM, whose latest municipal edition is from the 2010 Census, and use it in the social component of the IVSC.
-- **Power BI version of the dashboard:** the same semantic layer as a Power BI model (DAX measures over the `psi_bi` views), to compare both tools on the same numbers.
 - **Data quality monitoring:** a dashboard over `psi_ops.change_log` and the QA tables (rows per load, unmatched names per year).
